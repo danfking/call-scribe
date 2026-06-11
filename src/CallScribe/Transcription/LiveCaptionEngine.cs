@@ -20,8 +20,14 @@ public sealed class LiveCaptionEngine : IDisposable
     // below quiet-listening levels while staying above digital silence.
     private const float SilenceRmsThreshold = 0.002f;
 
+    // The mic track's captions are held briefly so loopback captions of the same
+    // words (speaker bleed) can win: the Others copy is the correctly-labelled one.
+    private static readonly TimeSpan MeQuarantine = TimeSpan.FromSeconds(2.5);
+
     private readonly WhisperFactory _factory;
     private readonly List<Task> _workers = [];
+    private readonly List<Task> _pendingPrints = [];
+    private readonly CrossTrackEchoFilter _echoFilter = new();
     private readonly object _consoleLock = new();
 
     public LiveCaptionEngine(string modelPath)
@@ -34,7 +40,13 @@ public sealed class LiveCaptionEngine : IDisposable
         _workers.Add(Task.Run(() => RunTrackAsync(label, colour, tap, sourceFormat)));
     }
 
-    public Task CompleteAsync() => Task.WhenAll(_workers);
+    public async Task CompleteAsync()
+    {
+        await Task.WhenAll(_workers).ConfigureAwait(false);
+        Task[] pending;
+        lock (_pendingPrints) pending = [.. _pendingPrints];
+        await Task.WhenAll(pending).ConfigureAwait(false);
+    }
 
     private async Task RunTrackAsync(string label, string colour, ChannelReader<AudioChunk> tap, WaveFormat format)
     {
@@ -78,15 +90,40 @@ public sealed class LiveCaptionEngine : IDisposable
             var caption = string.Join(" ", parts);
             if (caption.Length == 0 || IsNonSpeechAnnotation(caption)) return;
 
-            lock (_consoleLock)
+            var now = DateTime.Now;
+            if (label == "Others")
             {
-                AnsiConsole.MarkupLine(
-                    $"[grey]{DateTime.Now:HH:mm:ss}[/] [{colour}]{label,-6}[/] {caption.EscapeMarkup()}");
+                // Loopback is authoritative: print immediately and register so
+                // mic-side echoes of the same words can be suppressed.
+                _echoFilter.Record(label, caption, now);
+                Print(now, colour, label, caption);
+            }
+            else
+            {
+                // Mic captions wait briefly: if the same words arrive on loopback,
+                // this was speaker bleed, not the user talking.
+                var print = Task.Run(async () =>
+                {
+                    await Task.Delay(MeQuarantine).ConfigureAwait(false);
+                    if (_echoFilter.IsEchoOfOtherTrack(label, caption, DateTime.Now)) return;
+                    _echoFilter.Record(label, caption, DateTime.Now);
+                    Print(now, colour, label, caption);
+                });
+                lock (_pendingPrints) _pendingPrints.Add(print);
             }
         }
         finally
         {
             buffer.SetLength(0);
+        }
+    }
+
+    private void Print(DateTime at, string colour, string label, string caption)
+    {
+        lock (_consoleLock)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{at:HH:mm:ss}[/] [{colour}]{label,-6}[/] {caption.EscapeMarkup()}");
         }
     }
 
