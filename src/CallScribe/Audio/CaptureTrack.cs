@@ -24,6 +24,10 @@ public sealed class CaptureTrack : IDisposable
     public WaveFormat WaveFormat => _capture.WaveFormat;
     public ChannelReader<AudioChunk> Chunks => _channel.Reader;
 
+    /// <summary>Set when capture died mid-recording (e.g. the device was unplugged).
+    /// The WAV is still finalised with whatever was captured.</summary>
+    public Exception? Error { get; private set; }
+
     public CaptureTrack(string name, IWaveIn capture, Stopwatch sharedEpoch, string outputPath)
     {
         Name = name;
@@ -73,19 +77,30 @@ public sealed class CaptureTrack : IDisposable
         var blockAlign = format.BlockAlign;
 
         await using var writer = new WaveFileWriter(_outputPath, format);
-        await foreach (var chunk in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
+        try
         {
-            var expectedBytes = (long)(_epoch.Elapsed.TotalSeconds * format.AverageBytesPerSecond);
-            var gap = expectedBytes - (bytesWritten + chunk.Count);
-            if (gap > toleranceBytes)
+            await foreach (var chunk in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                var padBytes = gap - (gap % blockAlign);
-                await WriteZerosAsync(writer, padBytes).ConfigureAwait(false);
-                bytesWritten += padBytes;
-            }
+                var expectedBytes = (long)(_epoch.Elapsed.TotalSeconds * format.AverageBytesPerSecond);
+                var gap = expectedBytes - (bytesWritten + chunk.Count);
+                if (gap > toleranceBytes)
+                {
+                    var padBytes = gap - (gap % blockAlign);
+                    await WriteZerosAsync(writer, padBytes).ConfigureAwait(false);
+                    bytesWritten += padBytes;
+                }
 
-            await writer.WriteAsync(chunk.Buffer.AsMemory(0, chunk.Count)).ConfigureAwait(false);
-            bytesWritten += chunk.Count;
+                await writer.WriteAsync(chunk.Buffer.AsMemory(0, chunk.Count)).ConfigureAwait(false);
+                bytesWritten += chunk.Count;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Capture died (device unplugged, driver reset). Keep what we have:
+            // the writer disposes cleanly below, so the WAV stays playable.
+            Error = ex is System.Threading.Channels.ChannelClosedException { InnerException: not null } closed
+                ? closed.InnerException
+                : ex;
         }
 
         // Final pad so both tracks end at the same wall-clock instant.

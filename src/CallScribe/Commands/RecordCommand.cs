@@ -18,11 +18,21 @@ public static class RecordCommand
             Description = "Stop automatically after N seconds (default: Enter stops)",
         };
 
-        var record = new Command("record", "Record the current call in the foreground; Enter stops");
+        var noTranscribeOption = new Option<bool>("--no-transcribe")
+        {
+            Description = "Skip the automatic transcription after stopping",
+        };
+
+        var record = new Command("record", "Record the current call in the foreground; Enter stops, then auto-transcribes");
         record.Options.Add(labelOption);
         record.Options.Add(secondsOption);
+        record.Options.Add(noTranscribeOption);
         record.SetAction((parseResult, ct) =>
-            RunForegroundAsync(parseResult.GetValue(labelOption), parseResult.GetValue(secondsOption), ct));
+            RunForegroundAsync(
+                parseResult.GetValue(labelOption),
+                parseResult.GetValue(secondsOption),
+                parseResult.GetValue(noTranscribeOption),
+                ct));
 
         var start = new Command("start", "Start a detached background recording");
         start.Options.Add(labelOption);
@@ -55,7 +65,7 @@ public static class RecordCommand
         return $"{stamp}-{safe}";
     }
 
-    private static async Task<int> RunForegroundAsync(string? label, int? seconds, CancellationToken ct)
+    private static async Task<int> RunForegroundAsync(string? label, int? seconds, bool noTranscribe, CancellationToken ct)
     {
         if (IsRecordingInProgress())
         {
@@ -63,8 +73,9 @@ public static class RecordCommand
             return 1;
         }
 
+        var config = AppConfig.Load();
         var stem = MakeStem(label);
-        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir);
+        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
         engine.Start();
 
         AnsiConsole.MarkupLine($"[green]Recording[/] -> {engine.OthersPath.EscapeMarkup()} (+ .me.wav)");
@@ -85,7 +96,23 @@ public static class RecordCommand
 
         var duration = await engine.StopAsync().ConfigureAwait(false);
         AnsiConsole.MarkupLine($"[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
+        ReportCaptureErrors(engine);
+
+        if (noTranscribe) return 0;
+
+        var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
+        await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
         return 0;
+    }
+
+    private static void ReportCaptureErrors(CaptureEngine engine)
+    {
+        foreach (var (track, error) in engine.Errors)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]Warning:[/] {track} capture failed mid-recording ({error.Message.EscapeMarkup()}). " +
+                "The track was finalised with what was captured up to that point.");
+        }
     }
 
     private static int StartDetached(string? label)
@@ -127,7 +154,7 @@ public static class RecordCommand
 
     private static async Task<int> RunDetachedWorkerAsync(string stem, CancellationToken ct)
     {
-        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir);
+        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, AppConfig.Load());
         engine.Start();
         try
         {

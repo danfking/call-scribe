@@ -10,10 +10,13 @@ public static class AppPaths
     public static string StateDir => Path.Combine(DataDir, "state");
     public static string ModelsDir => Path.Combine(DataDir, "models");
 
+    /// <summary>Set from config at startup when the user overrides the output location.</summary>
+    public static string? OutputRootOverride { get; set; }
+
     // Deliberately NOT the Documents folder: Documents is commonly redirected to
     // OneDrive (including corporate tenants), and call recordings must never land
     // in a synced folder by default.
-    public static string OutputRoot =>
+    public static string OutputRoot => OutputRootOverride ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "call-scribe");
 
     public static string RecordingsDir => Path.Combine(OutputRoot, "recordings");
