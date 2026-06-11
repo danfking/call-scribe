@@ -14,6 +14,8 @@ catch (InvalidDataException ex)
     return 1;
 }
 
+CallScribe.Transcription.WhisperNativeResolver.Apply();
+
 var root = new RootCommand("call-scribe: local dual-track call recording and transcription");
 root.Subcommands.Add(RecordCommand.Create());
 root.Subcommands.Add(TranscribeCommand.Create());

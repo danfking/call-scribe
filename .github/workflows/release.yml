@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish CPU (single exe)
+        run: >
+          dotnet publish src/CallScribe -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish/cpu
+
+      - name: Publish CUDA
+        run: >
+          dotnet publish src/CallScribe -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:CallScribeCuda=true
+          -o publish/cuda
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          Copy-Item publish/cpu/call-scribe.exe call-scribe-${{ github.ref_name }}-win-x64.exe
+          Compress-Archive -Path publish/cuda/call-scribe.exe -DestinationPath call-scribe-${{ github.ref_name }}-win-x64-cuda.zip
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            call-scribe-${{ github.ref_name }}-win-x64.exe
+            call-scribe-${{ github.ref_name }}-win-x64-cuda.zip
+          generate_release_notes: true
+          body: |
+            **call-scribe-${{ github.ref_name }}-win-x64.exe** is the standard build: download and run, no installs. CPU transcription with the default large-v3-turbo model runs near real-time on a modern CPU.
+
+            **call-scribe-${{ github.ref_name }}-win-x64-cuda.zip** is the NVIDIA GPU build. Requires the CUDA Toolkit (12.4+) installed; falls back to CPU automatically if no usable GPU is present.
+
+            The Whisper model (~874 MB) downloads automatically on first transcription.
