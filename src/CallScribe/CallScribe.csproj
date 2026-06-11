@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>CallScribe</RootNamespace>
+    <AssemblyName>call-scribe</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="Spectre.Console" Version="0.51.1" />
+    <PackageReference Include="System.CommandLine" Version="2.0.9" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+  <!-- CUDA runtime only in the dedicated GPU publish profile: it balloons the artifact
+       and requires the user's CUDA Toolkit. CPU is the headline build. -->
+  <ItemGroup Condition="'$(CallScribeCuda)' == 'true'">
+    <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.1" />
+  </ItemGroup>
+
+</Project>

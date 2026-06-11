@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CallScribe/CallScribe.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CallScribe.Tests/CallScribe.Tests.csproj" />
+  </Folder>
+</Solution>
