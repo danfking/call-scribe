@@ -52,6 +52,7 @@ public static class TranscribeCommand
 
         using var transcriber = new TrackTranscriber(modelPath, vadPath);
 
+        var transcripts = new Dictionary<string, TrackTranscript>();
         foreach (var (wav, track) in new[] { (othersWav, "Others"), (meWav, "Me") })
         {
             var watch = Stopwatch.StartNew();
@@ -63,11 +64,15 @@ public static class TranscribeCommand
 
             var jsonPath = $"{stemPath}.{track.ToLowerInvariant()}.json";
             transcript.Save(jsonPath);
+            transcripts[track] = transcript;
             AnsiConsole.MarkupLine(
                 $"{track}: {transcript.Segments.Count} segments " +
                 $"({transcript.Duration:F0}s audio in {watch.Elapsed.TotalSeconds:F0}s) -> {jsonPath.EscapeMarkup()}");
         }
 
+        var stem = Path.GetFileName(stemPath);
+        var transcriptPath = TranscriptMerger.Merge(stem, transcripts["Others"], transcripts["Me"], AppPaths.TranscriptsDir);
+        AnsiConsole.MarkupLine($"[green]Transcript[/] -> {transcriptPath.EscapeMarkup()}");
         return 0;
     }
 
