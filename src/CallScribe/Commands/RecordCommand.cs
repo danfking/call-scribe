@@ -57,7 +57,7 @@ public static class RecordCommand
         return record;
     }
 
-    private static string MakeStem(string? label)
+    internal static string MakeStem(string? label)
     {
         var stamp = DateTime.Now.ToString("yyyy-MM-dd-HHmm");
         if (string.IsNullOrWhiteSpace(label)) return stamp;

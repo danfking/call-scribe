@@ -15,6 +15,7 @@ public sealed class CaptureTrack : IDisposable
 {
     private readonly IWaveIn _capture;
     private readonly Channel<AudioChunk> _channel;
+    private readonly List<ChannelWriter<AudioChunk>> _taps = [];
     private readonly Stopwatch _epoch;
     private readonly string _outputPath;
     private Task<TimeSpan>? _writerTask;
@@ -44,13 +45,25 @@ public sealed class CaptureTrack : IDisposable
         {
             var copy = new byte[e.BytesRecorded];
             Buffer.BlockCopy(e.Buffer, 0, copy, 0, e.BytesRecorded);
-            _channel.Writer.TryWrite(new AudioChunk(copy, e.BytesRecorded));
+            var chunk = new AudioChunk(copy, e.BytesRecorded);
+            _channel.Writer.TryWrite(chunk);
+            foreach (var tap in _taps) tap.TryWrite(chunk);
         };
         _capture.RecordingStopped += (_, e) =>
         {
             _channel.Writer.TryComplete(e.Exception);
+            foreach (var tap in _taps) tap.TryComplete();
             _stopped.TrySetResult();
         };
+    }
+
+    /// <summary>Subscribe a secondary consumer (e.g. live captions) to the audio stream.
+    /// Chunks are shared, never copied per-tap. Call before Start().</summary>
+    public ChannelReader<AudioChunk> AddTap()
+    {
+        var channel = Channel.CreateUnbounded<AudioChunk>(new UnboundedChannelOptions { SingleReader = true });
+        _taps.Add(channel.Writer);
+        return channel.Reader;
     }
 
     public void Start()

@@ -11,6 +11,9 @@ public sealed class CaptureEngine : IDisposable
     private readonly CaptureTrack _others;
     private readonly CaptureTrack _me;
 
+    public CaptureTrack OthersTrack => _others;
+    public CaptureTrack MeTrack => _me;
+
     public string OthersPath { get; }
     public string MePath { get; }
     public string LoopbackDeviceName { get; }

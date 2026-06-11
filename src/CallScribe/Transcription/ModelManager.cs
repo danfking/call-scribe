@@ -86,9 +86,14 @@ public static class ModelManager
         "large-v3-turbo" or "turbo" => GgmlType.LargeV3Turbo,
         "large-v3" or "large" => GgmlType.LargeV3,
         "medium" => GgmlType.Medium,
+        "medium.en" => GgmlType.MediumEn,
         "small" => GgmlType.Small,
+        "small.en" => GgmlType.SmallEn,
         "base" => GgmlType.Base,
+        "base.en" => GgmlType.BaseEn,
         "tiny" => GgmlType.Tiny,
-        _ => throw new ArgumentException($"Unknown model '{name}'. Use large-v3-turbo, large-v3, medium, small, base or tiny."),
+        "tiny.en" => GgmlType.TinyEn,
+        _ => throw new ArgumentException(
+            $"Unknown model '{name}'. Use large-v3-turbo, large-v3, medium[.en], small[.en], base[.en] or tiny[.en]."),
     };
 }
