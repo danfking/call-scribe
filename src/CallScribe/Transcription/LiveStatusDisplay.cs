@@ -13,8 +13,27 @@ public sealed class LiveStatusDisplay
     private readonly Lock _lock = new();
     private readonly List<(string Label, string Colour)> _order = [];
     private readonly Dictionary<string, TrackState> _states = [];
-    private readonly bool _interactive = !Console.IsOutputRedirected;
+    private readonly bool _interactive = ConsoleIsUsable();
     private bool _statusVisible;
+    private string _pad = "";
+    private int _padWidth = -1;
+
+    // True only when output is not redirected and a real console window exists.
+    // On a detached or service-spawned process Console.WindowWidth throws, so we
+    // treat any failure as "no usable console" and disable the status line.
+    private static bool ConsoleIsUsable()
+    {
+        if (Console.IsOutputRedirected) return false;
+        try
+        {
+            _ = Console.WindowWidth;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public void Register(string label, string colour)
     {
@@ -63,7 +82,14 @@ public sealed class LiveStatusDisplay
     {
         if (!_interactive || !_statusVisible) return;
         var width = Math.Max(Console.WindowWidth - 1, 1);
-        Console.Write('\r' + new string(' ', width) + '\r');
+        if (width != _padWidth)
+        {
+            _pad = new string(' ', width);
+            _padWidth = width;
+        }
+        Console.Write('\r');
+        Console.Write(_pad);
+        Console.Write('\r');
         _statusVisible = false;
     }
 

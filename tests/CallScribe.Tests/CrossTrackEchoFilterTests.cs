@@ -69,6 +69,28 @@ public class CrossTrackEchoFilterTests
     }
 
     [Fact]
+    public void EntriesOlderThanRetentionWindow_ArePruned()
+    {
+        // The Others entry ends at T0+8. The far-future query ends at T0+75,
+        // which is more than the 60s retention window past T0+8, so the query's
+        // Prune evicts the entry before matching. Without pruning the identical
+        // words would still be on record; retention is what causes the non-match.
+        var filter = new CrossTrackEchoFilter();
+        filter.Record("Others", "It has to actually listen to the output device.", T0, T0.AddSeconds(8));
+
+        var farFuture = filter.IsEchoOfOtherTrack(
+            "Me", "it has to actually listen to the output device", T0.AddSeconds(70), T0.AddSeconds(75));
+        Assert.False(farFuture);
+
+        // The first query already pruned the entry. A second query whose span
+        // overlaps the original [T0, T0+8] now also fails to match, proving the
+        // entry was removed by retention rather than merely being non-overlapping.
+        var overlappingAfterPrune = filter.IsEchoOfOtherTrack(
+            "Me", "it has to actually listen to the output device", T0.AddSeconds(1), T0.AddSeconds(7));
+        Assert.False(overlappingAfterPrune);
+    }
+
+    [Fact]
     public void SameTrack_NeverMatchesItself()
     {
         var filter = new CrossTrackEchoFilter();

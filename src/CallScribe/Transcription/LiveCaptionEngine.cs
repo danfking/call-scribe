@@ -89,7 +89,12 @@ public sealed class LiveCaptionEngine : IDisposable
             }
         }
 
-        if (buffer.Length > format.AverageBytesPerSecond / 2)
+        // End of stream: flush any trailing audio regardless of size. A short final
+        // Others fragment must still be transcribed and recorded into the echo filter
+        // before SetOthersResolved() runs, otherwise an overlapping Me caption finds no
+        // Others entry to match and prints the bleed un-suppressed. FlushAsync's own
+        // guards (silence RMS and non-speech annotations) still decide what to keep.
+        if (buffer.Length > 0)
         {
             await FlushAsync(processor, buffer, format, label, colour, spanStart).ConfigureAwait(false);
         }
@@ -105,6 +110,10 @@ public sealed class LiveCaptionEngine : IDisposable
         try
         {
             // Whisper hallucinates on pure silence; skip chunks with no audible content.
+            // Residual limitation: when the loopback signal sits below this threshold but
+            // the mic's gain-normalised copy still transcribes (low speaker volume), the
+            // span resolves with no Others caption, so genuine bleed can still print as Me.
+            // This is the documented speakers-vs-headphones limitation.
             if (PeakRms(buffer, format) < SilenceRmsThreshold) return;
 
             _display.SetState(label, TrackState.Transcribing);
