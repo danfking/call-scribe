@@ -2,7 +2,6 @@ using System.Threading.Channels;
 using CallScribe.Audio;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using Spectre.Console;
 using Whisper.net;
 
 namespace CallScribe.Transcription;
@@ -10,25 +9,40 @@ namespace CallScribe.Transcription;
 /// <summary>Live captions during recording. Taps each capture track's chunk stream,
 /// accumulates audio until a natural pause (or a max window), runs a small fast
 /// Whisper model over the chunk, and prints the caption. This is a preview: the
-/// full-quality batch transcription at stop remains the artifact.</summary>
+/// full-quality batch transcription at stop remains the artifact.
+///
+/// Speaker-bleed suppression: on speakers the mic hears the other side, so the same
+/// words surface on both tracks. Each caption carries the wall-clock span of audio
+/// it came from. Me captions are held until the Others track has resolved past
+/// their span (its caption for the same audio exists, or its loopback was silent),
+/// then dropped if an Others caption with an overlapping span says the same thing.
+/// Others captions are authoritative and never suppressed.</summary>
 public sealed class LiveCaptionEngine : IDisposable
 {
     private static readonly TimeSpan MaxWindow = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan MinWindow = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan SilenceTail = TimeSpan.FromSeconds(0.6);
+    private static readonly TimeSpan FrontierMargin = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan FrontierTimeout = TimeSpan.FromSeconds(15);
+
     // Loopback capture level scales with the device volume, so this must sit well
     // below quiet-listening levels while staying above digital silence.
     private const float SilenceRmsThreshold = 0.002f;
 
-    // The mic track's captions are held briefly so loopback captions of the same
-    // words (speaker bleed) can win: the Others copy is the correctly-labelled one.
-    private static readonly TimeSpan MeQuarantine = TimeSpan.FromSeconds(2.5);
+    public const string OthersLabel = "Others";
+    public const string MeLabel = "Me";
 
     private readonly WhisperFactory _factory;
-    private readonly List<Task> _workers = [];
-    private readonly List<Task> _pendingPrints = [];
+    private readonly LiveStatusDisplay _display = new();
     private readonly CrossTrackEchoFilter _echoFilter = new();
-    private readonly object _consoleLock = new();
+    private readonly List<Task> _workers = [];
+    private readonly List<Task> _pendingDecisions = [];
+
+    /// <summary>Start of the Others track's unresolved audio, as ticks.
+    /// long.MaxValue = nothing unresolved (its buffer is empty and no chunk is being
+    /// transcribed), meaning the track is resolved up to the present moment. A silent
+    /// loopback cannot produce bleed, so idle counts as fully resolved.</summary>
+    private long _othersUnresolvedFromTicks = long.MaxValue;
 
     public LiveCaptionEngine(string modelPath)
     {
@@ -37,6 +51,7 @@ public sealed class LiveCaptionEngine : IDisposable
 
     public void Attach(string label, string colour, ChannelReader<AudioChunk> tap, WaveFormat sourceFormat)
     {
+        _display.Register(label, colour);
         _workers.Add(Task.Run(() => RunTrackAsync(label, colour, tap, sourceFormat)));
     }
 
@@ -44,8 +59,9 @@ public sealed class LiveCaptionEngine : IDisposable
     {
         await Task.WhenAll(_workers).ConfigureAwait(false);
         Task[] pending;
-        lock (_pendingPrints) pending = [.. _pendingPrints];
+        lock (_pendingDecisions) pending = [.. _pendingDecisions];
         await Task.WhenAll(pending).ConfigureAwait(false);
+        _display.Shutdown();
     }
 
     private async Task RunTrackAsync(string label, string colour, ChannelReader<AudioChunk> tap, WaveFormat format)
@@ -53,32 +69,54 @@ public sealed class LiveCaptionEngine : IDisposable
         // One processor per track: a WhisperProcessor is not safe for concurrent use.
         using var processor = _factory.CreateBuilder().WithLanguage("en").Build();
         var buffer = new MemoryStream();
+        var spanStart = DateTime.Now;
 
         await foreach (var chunk in tap.ReadAllAsync().ConfigureAwait(false))
         {
+            if (buffer.Length == 0)
+            {
+                spanStart = DateTime.Now;
+                if (label == OthersLabel) SetOthersUnresolvedFrom(spanStart);
+                _display.SetState(label, TrackState.Hearing);
+            }
             buffer.Write(chunk.Buffer, 0, chunk.Count);
-            var buffered = TimeSpan.FromSeconds((double)buffer.Length / format.AverageBytesPerSecond);
 
+            var buffered = TimeSpan.FromSeconds((double)buffer.Length / format.AverageBytesPerSecond);
             var atPause = buffered >= MinWindow && IsTrailingSilence(buffer, format);
             if (buffered >= MaxWindow || atPause)
             {
-                await FlushAsync(processor, buffer, format, label, colour).ConfigureAwait(false);
+                await FlushAsync(processor, buffer, format, label, colour, spanStart).ConfigureAwait(false);
             }
         }
 
-        if (buffer.Length > format.AverageBytesPerSecond / 2)
+        // End of stream: flush any trailing audio regardless of size. A short final
+        // Others fragment must still be transcribed and recorded into the echo filter
+        // before SetOthersResolved() runs, otherwise an overlapping Me caption finds no
+        // Others entry to match and prints the bleed un-suppressed. FlushAsync's own
+        // guards (silence RMS and non-speech annotations) still decide what to keep.
+        if (buffer.Length > 0)
         {
-            await FlushAsync(processor, buffer, format, label, colour).ConfigureAwait(false);
+            await FlushAsync(processor, buffer, format, label, colour, spanStart).ConfigureAwait(false);
         }
+        if (label == OthersLabel) SetOthersResolved();
+        _display.SetState(label, TrackState.Listening);
     }
 
-    private async Task FlushAsync(WhisperProcessor processor, MemoryStream buffer, WaveFormat format, string label, string colour)
+    private async Task FlushAsync(
+        WhisperProcessor processor, MemoryStream buffer, WaveFormat format,
+        string label, string colour, DateTime spanStart)
     {
+        var spanEnd = DateTime.Now;
         try
         {
             // Whisper hallucinates on pure silence; skip chunks with no audible content.
+            // Residual limitation: when the loopback signal sits below this threshold but
+            // the mic's gain-normalised copy still transcribes (low speaker volume), the
+            // span resolves with no Others caption, so genuine bleed can still print as Me.
+            // This is the documented speakers-vs-headphones limitation.
             if (PeakRms(buffer, format) < SilenceRmsThreshold) return;
 
+            _display.SetState(label, TrackState.Transcribing);
             using var wav16k = ConvertTo16kMonoWav(buffer, format, PeakAmplitude(buffer, format));
             var parts = new List<string>();
             await foreach (var segment in processor.ProcessAsync(wav16k).ConfigureAwait(false))
@@ -90,42 +128,55 @@ public sealed class LiveCaptionEngine : IDisposable
             var caption = string.Join(" ", parts);
             if (caption.Length == 0 || IsNonSpeechAnnotation(caption)) return;
 
-            var now = DateTime.Now;
-            if (label == "Others")
+            if (label == OthersLabel)
             {
-                // Loopback is authoritative: print immediately and register so
-                // mic-side echoes of the same words can be suppressed.
-                _echoFilter.Record(label, caption, now);
-                Print(now, colour, label, caption);
+                // Loopback is authoritative: record so mic-side echoes can be
+                // suppressed, then print immediately.
+                _echoFilter.Record(label, caption, spanStart, spanEnd);
+                _display.PrintCaption(spanStart, colour, label, caption);
             }
             else
             {
-                // Mic captions wait briefly: if the same words arrive on loopback,
-                // this was speaker bleed, not the user talking.
-                var print = Task.Run(async () =>
-                {
-                    await Task.Delay(MeQuarantine).ConfigureAwait(false);
-                    if (_echoFilter.IsEchoOfOtherTrack(label, caption, DateTime.Now)) return;
-                    _echoFilter.Record(label, caption, DateTime.Now);
-                    Print(now, colour, label, caption);
-                });
-                lock (_pendingPrints) _pendingPrints.Add(print);
+                ScheduleMeDecision(caption, colour, spanStart, spanEnd);
             }
         }
         finally
         {
             buffer.SetLength(0);
+            if (label == OthersLabel) SetOthersResolved();
+            _display.SetState(label, TrackState.Listening);
         }
     }
 
-    private void Print(DateTime at, string colour, string label, string caption)
+    /// <summary>Hold a Me caption until the Others track has resolved past its span
+    /// (or a safety timeout), then print unless it turns out to be bleed.</summary>
+    private void ScheduleMeDecision(string caption, string colour, DateTime spanStart, DateTime spanEnd)
     {
-        lock (_consoleLock)
+        var decision = Task.Run(async () =>
         {
-            AnsiConsole.MarkupLine(
-                $"[grey]{at:HH:mm:ss}[/] [{colour}]{label,-6}[/] {caption.EscapeMarkup()}");
-        }
+            var deadline = DateTime.Now + FrontierTimeout;
+            while (OthersResolvedUntil() < spanEnd + FrontierMargin && DateTime.Now < deadline)
+            {
+                await Task.Delay(250).ConfigureAwait(false);
+            }
+
+            if (_echoFilter.IsEchoOfOtherTrack(MeLabel, caption, spanStart, spanEnd)) return;
+            _display.PrintCaption(spanStart, colour, MeLabel, caption);
+        });
+        lock (_pendingDecisions) _pendingDecisions.Add(decision);
     }
+
+    private DateTime OthersResolvedUntil()
+    {
+        var ticks = Interlocked.Read(ref _othersUnresolvedFromTicks);
+        return ticks == long.MaxValue ? DateTime.Now : new DateTime(ticks);
+    }
+
+    private void SetOthersUnresolvedFrom(DateTime from) =>
+        Interlocked.Exchange(ref _othersUnresolvedFromTicks, from.Ticks);
+
+    private void SetOthersResolved() =>
+        Interlocked.Exchange(ref _othersUnresolvedFromTicks, long.MaxValue);
 
     /// <summary>Whisper marks non-speech audio with bracketed annotations like
     /// [MUSIC PLAYING], (wind blowing) or [BLANK_AUDIO]. Those are noise in a
@@ -160,6 +211,27 @@ public sealed class LiveCaptionEngine : IDisposable
         return output;
     }
 
+    /// <summary>RMS over the trailing window: low energy = the speaker paused.</summary>
+    private static bool IsTrailingSilence(MemoryStream buffer, WaveFormat format)
+    {
+        var tailBytes = (int)(format.AverageBytesPerSecond * SilenceTail.TotalSeconds);
+        if (buffer.Length < tailBytes) return false;
+        return Rms(buffer, format, (int)(buffer.Length - tailBytes), tailBytes) < SilenceRmsThreshold;
+    }
+
+    /// <summary>Max RMS across coarse slices, so a short utterance in a long buffer still counts.</summary>
+    private static float PeakRms(MemoryStream buffer, WaveFormat format)
+    {
+        var sliceBytes = Math.Max(1, format.AverageBytesPerSecond / 2);
+        var peak = 0f;
+        for (var offset = 0; offset < buffer.Length; offset += sliceBytes)
+        {
+            var length = (int)Math.Min(sliceBytes, buffer.Length - offset);
+            peak = Math.Max(peak, Rms(buffer, format, offset, length));
+        }
+        return peak;
+    }
+
     /// <summary>Largest absolute sample value in the buffer (device format).</summary>
     private static float PeakAmplitude(MemoryStream buffer, WaveFormat format)
     {
@@ -180,27 +252,6 @@ public sealed class LiveCaptionEngine : IDisposable
             {
                 peak = Math.Max(peak, Math.Abs(BitConverter.ToInt16(data, i) / 32768f));
             }
-        }
-        return peak;
-    }
-
-    /// <summary>RMS over the trailing window: low energy = the speaker paused.</summary>
-    private static bool IsTrailingSilence(MemoryStream buffer, WaveFormat format)
-    {
-        var tailBytes = (int)(format.AverageBytesPerSecond * SilenceTail.TotalSeconds);
-        if (buffer.Length < tailBytes) return false;
-        return Rms(buffer, format, (int)(buffer.Length - tailBytes), tailBytes) < SilenceRmsThreshold;
-    }
-
-    /// <summary>Max RMS across coarse slices, so a short utterance in a long buffer still counts.</summary>
-    private static float PeakRms(MemoryStream buffer, WaveFormat format)
-    {
-        var sliceBytes = Math.Max(1, format.AverageBytesPerSecond / 2);
-        var peak = 0f;
-        for (var offset = 0; offset < buffer.Length; offset += sliceBytes)
-        {
-            var length = (int)Math.Min(sliceBytes, buffer.Length - offset);
-            peak = Math.Max(peak, Rms(buffer, format, offset, length));
         }
         return peak;
     }
@@ -240,5 +291,9 @@ public sealed class LiveCaptionEngine : IDisposable
         return count == 0 ? 0f : (float)Math.Sqrt(sum / count);
     }
 
-    public void Dispose() => _factory.Dispose();
+    public void Dispose()
+    {
+        _display.Shutdown();
+        _factory.Dispose();
+    }
 }

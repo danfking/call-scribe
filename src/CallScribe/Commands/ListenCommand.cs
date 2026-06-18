@@ -55,8 +55,8 @@ public static class ListenCommand
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
         using var captions = new LiveCaptionEngine(liveModelPath);
 
-        captions.Attach("Others", "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
-        captions.Attach("Me", "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
+        captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
+        captions.Attach(LiveCaptionEngine.MeLabel, "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
 
         engine.Start();
         AnsiConsole.MarkupLine($"[green]Listening[/] -> {engine.OthersPath.EscapeMarkup()} (+ .me.wav)");

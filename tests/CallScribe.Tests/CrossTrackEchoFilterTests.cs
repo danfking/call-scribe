@@ -7,26 +7,39 @@ public class CrossTrackEchoFilterTests
     private static readonly DateTime T0 = new(2026, 6, 11, 16, 0, 0);
 
     [Fact]
-    public void MicEchoOfRecentOthersCaption_IsDetected()
+    public void MicEchoWithOverlappingSpan_IsDetected()
     {
         var filter = new CrossTrackEchoFilter();
-        filter.Record("Others", "It has to actually listen to the output device.", T0);
+        filter.Record("Others", "It has to actually listen to the output device.", T0, T0.AddSeconds(8));
 
-        // Same words heard by the mic a moment later, slightly garbled.
+        // Same words heard by the mic over a similar window, slightly garbled.
         var isEcho = filter.IsEchoOfOtherTrack(
-            "Me", "it has to actually listen to the output", T0.AddSeconds(2));
+            "Me", "it has to actually listen to the output", T0.AddSeconds(1), T0.AddSeconds(7));
 
         Assert.True(isEcho);
+    }
+
+    [Fact]
+    public void SameWordsWithDisjointSpans_AreNotAnEcho()
+    {
+        // Someone genuinely repeating a phrase half a minute later is conversation.
+        var filter = new CrossTrackEchoFilter();
+        filter.Record("Others", "It has to actually listen to the output device.", T0, T0.AddSeconds(8));
+
+        var isEcho = filter.IsEchoOfOtherTrack(
+            "Me", "it has to actually listen to the output device", T0.AddSeconds(30), T0.AddSeconds(36));
+
+        Assert.False(isEcho);
     }
 
     [Fact]
     public void IndependentMicSpeech_IsNotAnEcho()
     {
         var filter = new CrossTrackEchoFilter();
-        filter.Record("Others", "The pocket clip slides right in here, nice and solid.", T0);
+        filter.Record("Others", "The pocket clip slides right in here, nice and solid.", T0, T0.AddSeconds(8));
 
         var isEcho = filter.IsEchoOfOtherTrack(
-            "Me", "Test, test, one, two, three, testing.", T0.AddSeconds(1));
+            "Me", "Test, test, one, two, three, testing.", T0.AddSeconds(2), T0.AddSeconds(6));
 
         Assert.False(isEcho);
     }
@@ -34,32 +47,56 @@ public class CrossTrackEchoFilterTests
     [Fact]
     public void ShortBackchannel_IsNeverSuppressed()
     {
-        // "Yeah." on both tracks is normal conversation, not bleed.
+        // "Yeah, okay." on both tracks at once is normal conversation, not bleed.
         var filter = new CrossTrackEchoFilter();
-        filter.Record("Others", "Yeah, okay.", T0);
+        filter.Record("Others", "Yeah, okay.", T0, T0.AddSeconds(2));
 
-        Assert.False(filter.IsEchoOfOtherTrack("Me", "Yeah, okay.", T0.AddSeconds(1)));
+        Assert.False(filter.IsEchoOfOtherTrack("Me", "Yeah, okay.", T0, T0.AddSeconds(2)));
     }
 
     [Fact]
-    public void OldCaptions_AgeOutOfTheWindow()
+    public void SpanSlack_CoversChunkBoundaryDifferences()
     {
-        var filter = new CrossTrackEchoFilter(window: TimeSpan.FromSeconds(12));
-        filter.Record("Others", "It has to actually listen to the output device.", T0);
+        // Tracks chunk independently: the mic copy can start just after the
+        // loopback span ended. Slack absorbs the boundary difference.
+        var filter = new CrossTrackEchoFilter();
+        filter.Record("Others", "We've got the new crossfire reels here, give them a try.", T0, T0.AddSeconds(4));
 
         var isEcho = filter.IsEchoOfOtherTrack(
-            "Me", "it has to actually listen to the output device", T0.AddSeconds(30));
+            "Me", "we've got the new crossfire reels here give them a try", T0.AddSeconds(5), T0.AddSeconds(9));
 
-        Assert.False(isEcho);
+        Assert.True(isEcho);
+    }
+
+    [Fact]
+    public void EntriesOlderThanRetentionWindow_ArePruned()
+    {
+        // The Others entry ends at T0+8. The far-future query ends at T0+75,
+        // which is more than the 60s retention window past T0+8, so the query's
+        // Prune evicts the entry before matching. Without pruning the identical
+        // words would still be on record; retention is what causes the non-match.
+        var filter = new CrossTrackEchoFilter();
+        filter.Record("Others", "It has to actually listen to the output device.", T0, T0.AddSeconds(8));
+
+        var farFuture = filter.IsEchoOfOtherTrack(
+            "Me", "it has to actually listen to the output device", T0.AddSeconds(70), T0.AddSeconds(75));
+        Assert.False(farFuture);
+
+        // The first query already pruned the entry. A second query whose span
+        // overlaps the original [T0, T0+8] now also fails to match, proving the
+        // entry was removed by retention rather than merely being non-overlapping.
+        var overlappingAfterPrune = filter.IsEchoOfOtherTrack(
+            "Me", "it has to actually listen to the output device", T0.AddSeconds(1), T0.AddSeconds(7));
+        Assert.False(overlappingAfterPrune);
     }
 
     [Fact]
     public void SameTrack_NeverMatchesItself()
     {
         var filter = new CrossTrackEchoFilter();
-        filter.Record("Me", "It has to actually listen to the output device.", T0);
+        filter.Record("Me", "It has to actually listen to the output device.", T0, T0.AddSeconds(8));
 
         Assert.False(filter.IsEchoOfOtherTrack(
-            "Me", "It has to actually listen to the output device.", T0.AddSeconds(1)));
+            "Me", "It has to actually listen to the output device.", T0, T0.AddSeconds(8)));
     }
 }
