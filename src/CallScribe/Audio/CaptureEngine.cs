@@ -19,7 +19,7 @@ public sealed class CaptureEngine : IDisposable
     public string LoopbackDeviceName { get; }
     public string MicDeviceName { get; }
 
-    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null)
+    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null, bool aecMic = false)
     {
         Directory.CreateDirectory(recordingsDir);
         OthersPath = Path.Combine(recordingsDir, $"{stem}.others.wav");
@@ -33,7 +33,10 @@ public sealed class CaptureEngine : IDisposable
 
         var epoch = new Stopwatch();
         _others = new CaptureTrack("Others", new WasapiLoopbackCapture(render), epoch, OthersPath);
-        _me = new CaptureTrack("Me", new WasapiCapture(mic), epoch, MePath);
+        // The AEC source opens the default comms mic and speaker reference itself
+        // and emits 16 kHz mono; the raw path keeps the device's native format.
+        IWaveIn meCapture = aecMic ? new VoiceCaptureAecSource() : new WasapiCapture(mic);
+        _me = new CaptureTrack("Me", meCapture, epoch, MePath);
 
         epoch.Start();
     }
