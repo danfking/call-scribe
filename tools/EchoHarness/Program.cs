@@ -18,6 +18,7 @@ string? clipPath = null;
 var volumes = new List<float> { 0.10f, 0.25f, 0.50f, 0.75f, 1.00f };
 var tailSeconds = 12.0;
 var liveModel = "base.en";
+var trials = 1;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -32,6 +33,7 @@ for (var i = 0; i < args.Length; i++)
             break;
         case "--tail": tailSeconds = double.Parse(args[++i], CultureInfo.InvariantCulture); break;
         case "--live-model": liveModel = args[++i]; break;
+        case "--trials": trials = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
         default:
             Console.Error.WriteLine($"Unknown argument: {args[i]}");
             return 1;
@@ -41,7 +43,7 @@ for (var i = 0; i < args.Length; i++)
 if (clipPath is null)
 {
     Console.WriteLine("Usage: EchoHarness --clip <farside.mp3|wav> " +
-                      "[--volumes 0.1,0.25,0.5,0.75,1.0] [--tail 12] [--live-model base.en]");
+                      "[--volumes 0.1,0.25,0.5,0.75,1.0] [--trials 1] [--tail 12] [--live-model base.en]");
     return 1;
 }
 if (!File.Exists(clipPath))
@@ -72,20 +74,28 @@ var originalVolume = endpointVolume.MasterVolumeLevelScalar;
 var originalMute = endpointVolume.Mute;
 Console.WriteLine($"Render device: {renderDevice.FriendlyName} (volume will be swept, then restored)");
 
-var results = new List<RunResult>();
+var results = new List<VolumeStats>();
 try
 {
     endpointVolume.Mute = false;
     foreach (var level in volumes)
     {
         Console.WriteLine();
-        Console.WriteLine($"--- volume {level.ToString("P0", CultureInfo.InvariantCulture)} ---");
+        Console.WriteLine($"--- volume {level.ToString("P0", CultureInfo.InvariantCulture)} ({trials} trial(s)) ---");
         endpointVolume.MasterVolumeLevelScalar = level;
         await Task.Delay(400);
 
-        var result = await RunOneAsync(level);
-        results.Add(result);
-        Console.WriteLine($"    others={result.Others}  ME BLEED={result.MeBleed}");
+        var trialsWithLeak = 0;
+        var totalBleed = 0;
+        var samples = new List<string>();
+        for (var t = 1; t <= trials; t++)
+        {
+            var r = await RunOneAsync(level);
+            totalBleed += r.MeBleed;
+            if (r.MeBleed > 0) { trialsWithLeak++; samples.AddRange(r.MeCaptions); }
+            Console.WriteLine($"    trial {t}/{trials}: others={r.Others} me-bleed={r.MeBleed}");
+        }
+        results.Add(new VolumeStats(level, trials, trialsWithLeak, totalBleed, samples));
     }
 }
 finally
@@ -98,22 +108,23 @@ finally
 
 Console.WriteLine();
 Console.WriteLine("==== baseline results ====");
-Console.WriteLine("volume   others   me-bleed");
+Console.WriteLine("volume   trials   leaked    rate   total-bleed");
 foreach (var r in results)
 {
-    Console.WriteLine($"{r.Volume.ToString("P0", CultureInfo.InvariantCulture),6}   {r.Others,6}   {r.MeBleed,8}");
+    var rate = r.Trials == 0 ? 0 : (double)r.TrialsWithLeak / r.Trials;
+    Console.WriteLine($"{r.Volume.ToString("P0", CultureInfo.InvariantCulture),6}   {r.Trials,6}   {r.TrialsWithLeak,6}   {rate.ToString("P0", CultureInfo.InvariantCulture),5}   {r.TotalBleed,10}");
 }
 Console.WriteLine();
-foreach (var r in results.Where(r => r.MeBleed > 0))
+foreach (var r in results.Where(r => r.SampleCaptions.Count > 0))
 {
-    Console.WriteLine($"Me captions at {r.Volume.ToString("P0", CultureInfo.InvariantCulture)} (bleed):");
-    foreach (var c in r.MeCaptions) Console.WriteLine($"  - {c}");
+    Console.WriteLine($"Leaked Me captions at {r.Volume.ToString("P0", CultureInfo.InvariantCulture)}:");
+    foreach (var c in r.SampleCaptions) Console.WriteLine($"  - {c}");
 }
 
 var csvPath = Path.Combine(AppPaths.RecordingsDir, "echo-baseline.csv");
 await File.WriteAllLinesAsync(csvPath,
-    new[] { "volume,others,me_bleed" }.Concat(
-        results.Select(r => string.Create(CultureInfo.InvariantCulture, $"{r.Volume},{r.Others},{r.MeBleed}"))));
+    new[] { "volume,trials,trials_with_leak,total_bleed" }.Concat(
+        results.Select(r => string.Create(CultureInfo.InvariantCulture, $"{r.Volume},{r.Trials},{r.TrialsWithLeak},{r.TotalBleed}"))));
 Console.WriteLine();
 Console.WriteLine($"Wrote {csvPath}");
 return 0;
@@ -169,3 +180,6 @@ async Task<RunResult> RunOneAsync(float level)
 }
 
 internal readonly record struct RunResult(float Volume, int Others, int MeBleed, List<string> MeCaptions);
+
+internal readonly record struct VolumeStats(
+    float Volume, int Trials, int TrialsWithLeak, int TotalBleed, List<string> SampleCaptions);
