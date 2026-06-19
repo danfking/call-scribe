@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/CallScribe.Tests/CallScribe.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/EchoHarness/EchoHarness.csproj" />
+  </Folder>
 </Solution>

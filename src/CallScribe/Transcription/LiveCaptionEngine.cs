@@ -44,6 +44,11 @@ public sealed class LiveCaptionEngine : IDisposable
     /// loopback cannot produce bleed, so idle counts as fully resolved.</summary>
     private long _othersUnresolvedFromTicks = long.MaxValue;
 
+    /// <summary>Raised when a caption is printed: Others as soon as it is transcribed,
+    /// Me only after it survives echo suppression. Suppressed bleed never fires this.
+    /// Lets a harness or test observe what actually reached the screen.</summary>
+    public event Action<CaptionEvent>? CaptionEmitted;
+
     public LiveCaptionEngine(string modelPath)
     {
         _factory = WhisperFactory.FromPath(modelPath);
@@ -134,6 +139,7 @@ public sealed class LiveCaptionEngine : IDisposable
                 // suppressed, then print immediately.
                 _echoFilter.Record(label, caption, spanStart, spanEnd);
                 _display.PrintCaption(spanStart, colour, label, caption);
+                CaptionEmitted?.Invoke(new CaptionEvent(spanStart, label, caption));
             }
             else
             {
@@ -162,6 +168,7 @@ public sealed class LiveCaptionEngine : IDisposable
 
             if (_echoFilter.IsEchoOfOtherTrack(MeLabel, caption, spanStart, spanEnd)) return;
             _display.PrintCaption(spanStart, colour, MeLabel, caption);
+            CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption));
         });
         lock (_pendingDecisions) _pendingDecisions.Add(decision);
     }
