@@ -19,7 +19,7 @@ public sealed class CaptureEngine : IDisposable
     public string LoopbackDeviceName { get; }
     public string MicDeviceName { get; }
 
-    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null, bool aecMic = false)
+    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null, bool aecMic = false, int aecSuppressionLevel = 1)
     {
         Directory.CreateDirectory(recordingsDir);
         OthersPath = Path.Combine(recordingsDir, $"{stem}.others.wav");
@@ -38,7 +38,7 @@ public sealed class CaptureEngine : IDisposable
             // The AEC source opens the default communications mic and speaker reference
             // itself and emits 16 kHz mono. We do not resolve a mic device here, so a
             // configured micDevice is not consulted (and no MMDevice is left to leak).
-            meCapture = new VoiceCaptureAecSource();
+            meCapture = new VoiceCaptureAecSource { EchoSuppressionLevel = aecSuppressionLevel };
             MicDeviceName = "Default communications (AEC)";
         }
         else
