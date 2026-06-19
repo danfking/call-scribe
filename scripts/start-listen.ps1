@@ -11,10 +11,11 @@ if (-not (Test-Path $exe)) {
     exit 1
 }
 
-# --aec cancels far-side speaker bleed; the suppressor level defaults to 1, which
-# preserved the near-end voice in testing. Pass --aes 0 if you ever hear your own
-# voice getting clipped while the other side talks.
-& $exe listen --aec
+# Plain listen captures your mic over WASAPI (the Elgato) and the system audio,
+# and suppresses far-side bleed in the text layer. The --aec acoustic canceller
+# is available but does not reliably produce mic output inside listen yet (it
+# clashes with the loopback capture), so the shortcut uses plain listen for now.
+& $exe listen
 
 $transcripts = Join-Path $env:USERPROFILE "call-scribe\transcripts"
 Write-Host ""
