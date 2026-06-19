@@ -197,16 +197,18 @@ public sealed class VoiceCaptureAecSource : IWaveIn
             {
                 var hr = ProcessOutputOnce(arr);
 
+                // Check for a real failure first: a negative HRESULT can leave Length at
+                // 0, which would otherwise look like "no data" and spin silently forever.
+                if (hr < 0)
+                {
+                    Marshal.ThrowExceptionForHR(hr);
+                }
+
                 if (hr == SFalse || arr[0].Length == 0)
                 {
                     // Nothing produced this round: sleep briefly and poll again.
                     Thread.Sleep(10);
                     continue;
-                }
-
-                if (hr < 0)
-                {
-                    Marshal.ThrowExceptionForHR(hr);
                 }
 
                 // Drain the produced audio, then keep draining while the DMO says
@@ -223,13 +225,13 @@ public sealed class VoiceCaptureAecSource : IWaveIn
                     }
 
                     hr = ProcessOutputOnce(arr);
-                    if (hr == SFalse || arr[0].Length == 0)
-                    {
-                        break;
-                    }
                     if (hr < 0)
                     {
                         Marshal.ThrowExceptionForHR(hr);
+                    }
+                    if (hr == SFalse || arr[0].Length == 0)
+                    {
+                        break;
                     }
                 }
             }

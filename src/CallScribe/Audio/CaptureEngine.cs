@@ -27,15 +27,26 @@ public sealed class CaptureEngine : IDisposable
 
         using var enumerator = new MMDeviceEnumerator();
         var render = ResolveDevice(enumerator, DataFlow.Render, config?.LoopbackDevice);
-        var mic = ResolveDevice(enumerator, DataFlow.Capture, config?.MicDevice);
         LoopbackDeviceName = render.FriendlyName;
-        MicDeviceName = mic.FriendlyName;
 
         var epoch = new Stopwatch();
         _others = new CaptureTrack("Others", new WasapiLoopbackCapture(render), epoch, OthersPath);
-        // The AEC source opens the default comms mic and speaker reference itself
-        // and emits 16 kHz mono; the raw path keeps the device's native format.
-        IWaveIn meCapture = aecMic ? new VoiceCaptureAecSource() : new WasapiCapture(mic);
+
+        IWaveIn meCapture;
+        if (aecMic)
+        {
+            // The AEC source opens the default communications mic and speaker reference
+            // itself and emits 16 kHz mono. We do not resolve a mic device here, so a
+            // configured micDevice is not consulted (and no MMDevice is left to leak).
+            meCapture = new VoiceCaptureAecSource();
+            MicDeviceName = "Default communications (AEC)";
+        }
+        else
+        {
+            var mic = ResolveDevice(enumerator, DataFlow.Capture, config?.MicDevice);
+            MicDeviceName = mic.FriendlyName;
+            meCapture = new WasapiCapture(mic); // takes ownership of mic
+        }
         _me = new CaptureTrack("Me", meCapture, epoch, MePath);
 
         epoch.Start();
