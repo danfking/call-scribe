@@ -19,11 +19,15 @@ namespace CallScribe.Transcription;
 /// Others captions are authoritative and never suppressed.</summary>
 public sealed class LiveCaptionEngine : IDisposable
 {
-    private static readonly TimeSpan MaxWindow = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan MaxWindow = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MinWindow = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan SilenceTail = TimeSpan.FromSeconds(0.6);
     private static readonly TimeSpan FrontierMargin = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan FrontierTimeout = TimeSpan.FromSeconds(15);
+    // The Me-caption hold trades latency for catching far-side bleed. Keep it short
+    // so the live preview stays responsive; the accurate transcript at stop is
+    // unaffected. With continuous far-side audio a Me caption prints after at most
+    // this long instead of waiting indefinitely.
+    private static readonly TimeSpan FrontierTimeout = TimeSpan.FromSeconds(6);
 
     // Loopback capture level scales with the device volume, so this must sit well
     // below quiet-listening levels while staying above digital silence.
