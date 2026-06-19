@@ -64,6 +64,9 @@ public sealed class LiveCaptionEngine : IDisposable
         _workers.Add(Task.Run(() => RunTrackAsync(label, colour, tap, sourceFormat)));
     }
 
+    /// <summary>Set dashboard detail (the live model name shown in the footer).</summary>
+    public void ConfigureDisplay(string model) => _display.Configure(model);
+
     public async Task CompleteAsync()
     {
         await Task.WhenAll(_workers).ConfigureAwait(false);

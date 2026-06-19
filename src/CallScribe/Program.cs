@@ -3,6 +3,10 @@ using CallScribe;
 using CallScribe.Commands;
 using Spectre.Console;
 
+// Use UTF-8 output so geometric icons and box-drawing glyphs render instead of "?"
+// under the legacy console code page. Guarded for redirected / console-less hosts.
+try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* no console */ }
+
 try
 {
     // Apply the user's output-root override (if any) before any command resolves paths.

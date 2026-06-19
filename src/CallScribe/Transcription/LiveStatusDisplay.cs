@@ -1,38 +1,43 @@
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 namespace CallScribe.Transcription;
 
 public enum TrackState { Listening, Hearing, Transcribing }
 
-/// <summary>Owns the listen-mode console: caption lines plus a single status line
-/// at the bottom showing what each track is doing (listening / hearing audio /
-/// transcribing). The status line is rewritten in place and disabled entirely
-/// when output is redirected.</summary>
-public sealed class LiveStatusDisplay
+/// <summary>The listen-mode UI. When attached to a real console it renders a live
+/// dashboard (a header with elapsed time, a card per track showing its state, and
+/// a transcript panel that updates in place). When output is redirected it falls
+/// back to plain caption lines so pipes and logs still work.</summary>
+public sealed class LiveStatusDisplay : IDisposable
 {
+    private readonly bool _interactive = ConsoleIsUsable();
     private readonly Lock _lock = new();
     private readonly List<(string Label, string Colour)> _order = [];
     private readonly Dictionary<string, TrackState> _states = [];
-    private readonly bool _interactive = ConsoleIsUsable();
-    private bool _statusVisible;
-    private string _pad = "";
-    private int _padWidth = -1;
+    private readonly List<Caption> _captions = [];
+    private readonly DateTime _start = DateTime.Now;
+    private string _model = "";
+    private bool _started;
+    private volatile bool _running;
+    private Task? _liveTask;
 
-    // True only when output is not redirected and a real console window exists.
-    // On a detached or service-spawned process Console.WindowWidth throws, so we
-    // treat any failure as "no usable console" and disable the status line.
+    // Keep memory bounded; only the tail that fits the window is ever rendered.
+    private const int MaxCaptions = 500;
+
+    private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
+
     private static bool ConsoleIsUsable()
     {
         if (Console.IsOutputRedirected) return false;
-        try
-        {
-            _ = Console.WindowWidth;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        try { _ = Console.WindowWidth; return true; }
+        catch { return false; }
+    }
+
+    /// <summary>Footer detail shown on the dashboard (the live model name).</summary>
+    public void Configure(string model)
+    {
+        lock (_lock) _model = model;
     }
 
     public void Register(string label, string colour)
@@ -41,74 +46,135 @@ public sealed class LiveStatusDisplay
         {
             _order.Add((label, colour));
             _states[label] = TrackState.Listening;
-            Redraw();
         }
+        EnsureStarted();
     }
 
     public void SetState(string label, TrackState state)
     {
-        lock (_lock)
-        {
-            if (_states.TryGetValue(label, out var current) && current == state) return;
-            _states[label] = state;
-            Redraw();
-        }
+        lock (_lock) _states[label] = state;
     }
 
     public void PrintCaption(DateTime at, string colour, string label, string caption)
     {
+        if (!_interactive)
+        {
+            // Redirected: keep the plain line stream so pipes and logs still work.
+            AnsiConsole.MarkupLine($"[grey]{at:HH:mm:ss}[/] [{colour}]{label,-6}[/] {caption.EscapeMarkup()}");
+            return;
+        }
         lock (_lock)
         {
-            ClearStatus();
-            AnsiConsole.MarkupLine(
-                $"[grey]{at:HH:mm:ss}[/] [{colour}]{label,-6}[/] {caption.EscapeMarkup()}");
-            DrawStatus();
+            _captions.Add(new Caption(at, colour, label, caption));
+            if (_captions.Count > MaxCaptions)
+            {
+                _captions.RemoveRange(0, _captions.Count - MaxCaptions);
+            }
         }
     }
 
-    /// <summary>Remove the status line so the shell prompt lands cleanly.</summary>
+    /// <summary>Stop the live loop so the shell prompt (and any later output) lands cleanly.</summary>
     public void Shutdown()
     {
-        lock (_lock) ClearStatus();
+        if (!_running) return;
+        _running = false;
+        try { _liveTask?.Wait(TimeSpan.FromSeconds(2)); } catch { /* best effort */ }
     }
 
-    private void Redraw()
-    {
-        ClearStatus();
-        DrawStatus();
-    }
+    public void Dispose() => Shutdown();
 
-    private void ClearStatus()
-    {
-        if (!_interactive || !_statusVisible) return;
-        var width = Math.Max(Console.WindowWidth - 1, 1);
-        if (width != _padWidth)
-        {
-            _pad = new string(' ', width);
-            _padWidth = width;
-        }
-        Console.Write('\r');
-        Console.Write(_pad);
-        Console.Write('\r');
-        _statusVisible = false;
-    }
-
-    private void DrawStatus()
+    private void EnsureStarted()
     {
         if (!_interactive) return;
-        // Plain ASCII only: the console codepage may not render geometric symbols,
-        // which show up as stray "?" characters. The colour carries the track.
-        var parts = _order.Select(track =>
+        lock (_lock)
         {
-            var description = _states[track.Label] switch
+            if (_started) return;
+            _started = true;
+            _running = true;
+        }
+        _liveTask = Task.Run(RunLive);
+    }
+
+    private void RunLive()
+    {
+        AnsiConsole.Live(BuildDashboard())
+            .AutoClear(false)
+            .Overflow(VerticalOverflow.Crop)
+            .Start(ctx =>
             {
-                TrackState.Transcribing => "transcribing",
-                TrackState.Hearing => "hearing audio",
-                _ => "listening",
+                while (_running)
+                {
+                    ctx.UpdateTarget(BuildDashboard());
+                    Thread.Sleep(250);
+                }
+                // One final frame so the last captions stay on screen after stop.
+                ctx.UpdateTarget(BuildDashboard());
+            });
+    }
+
+    private IRenderable BuildDashboard()
+    {
+        lock (_lock)
+        {
+            var elapsed = DateTime.Now - _start;
+            var header = new Rule($"[bold]call-scribe[/]  [red]●[/] [grey]rec[/]  [grey]{elapsed:hh\\:mm\\:ss}[/]")
+            {
+                Justification = Justify.Left,
+                Style = Style.Parse("grey"),
             };
-            return $"[{track.Colour}]{track.Label}[/] [grey]{description}[/]";
-        });
-        AnsiConsole.Markup("[grey]status:[/] " + string.Join("   ", parts));
-        _statusVisible = true;
+
+            var cards = new Columns(_order.Select(BuildCard).ToArray()) { Expand = true };
+
+            var transcript = new Panel(BuildTranscript())
+                .Header("[grey] transcript [/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Grey)
+                .Expand();
+
+            var footer = new Markup(
+                $"[grey]Enter[/] stop & transcribe     [grey]model[/] {_model.EscapeMarkup()}");
+
+            return new Rows(header, cards, transcript, footer);
+        }
+    }
+
+    private IRenderable BuildCard((string Label, string Colour) track)
+    {
+        var (glyph, word) = _states.GetValueOrDefault(track.Label) switch
+        {
+            TrackState.Transcribing => ("▶", "transcribing"),
+            TrackState.Hearing => ("◐", "hearing audio"),
+            _ => ("○", "listening"),
+        };
+        var content = new Markup($"  [{track.Colour}]{glyph}[/]  [grey]{word}[/]");
+        return new Panel(content)
+            .Header($"[{track.Colour}] {track.Label} [/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .Expand();
+    }
+
+    private IRenderable BuildTranscript()
+    {
+        // Show the tail that fits, leaving room for the header, cards, borders, footer.
+        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        var slice = _captions.Count > visible
+            ? _captions.GetRange(_captions.Count - visible, visible)
+            : _captions;
+
+        if (slice.Count == 0)
+        {
+            return new Markup("[grey](waiting for audio…)[/]");
+        }
+
+        var lines = slice.Select(c =>
+            $"[grey]{c.At:HH:mm:ss}[/]  [{c.Colour}]{c.Label,-6}[/] {c.Text.EscapeMarkup()}");
+        return new Markup(string.Join("\n", lines));
+    }
+
+    private static int SafeWindowHeight()
+    {
+        try { return Console.WindowHeight; }
+        catch { return 24; }
     }
 }
