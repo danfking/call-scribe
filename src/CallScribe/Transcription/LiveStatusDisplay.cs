@@ -96,17 +96,19 @@ public sealed class LiveStatusDisplay
     private void DrawStatus()
     {
         if (!_interactive) return;
+        // Plain ASCII only: the console codepage may not render geometric symbols,
+        // which show up as stray "?" characters. The colour carries the track.
         var parts = _order.Select(track =>
         {
-            var (symbol, description) = _states[track.Label] switch
+            var description = _states[track.Label] switch
             {
-                TrackState.Transcribing => ("●", "transcribing"),
-                TrackState.Hearing => ("◐", "hearing audio"),
-                _ => ("○", "listening"),
+                TrackState.Transcribing => "transcribing",
+                TrackState.Hearing => "hearing audio",
+                _ => "listening",
             };
-            return $"[{track.Colour}]{symbol} {track.Label}[/] [grey]{description}[/]";
+            return $"[{track.Colour}]{track.Label}[/] [grey]{description}[/]";
         });
-        AnsiConsole.Markup(string.Join("   ", parts));
+        AnsiConsole.Markup("[grey]status:[/] " + string.Join("   ", parts));
         _statusVisible = true;
     }
 }
