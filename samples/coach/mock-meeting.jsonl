@@ -1,0 +1,7 @@
+{"t": 0.0, "speaker": "Others", "text": "Hi, thanks for joining. How are you doing today?"}
+{"t": 2.0, "speaker": "Me", "text": "Doing well, thanks for having me."}
+{"t": 4.0, "speaker": "Others", "text": "Can you walk me through the architecture?"}
+{"t": 8.0, "speaker": "Me", "text": "Sure. It captures the mic and system audio as two separate tracks."}
+{"t": 13.0, "speaker": "Others", "text": "How do you handle latency on the live captions?"}
+{"t": 17.0, "speaker": "Me", "text": "A small Whisper model runs on short chunks with a pause detector."}
+{"t": 21.0, "speaker": "Others", "text": "Great, that makes sense."}

@@ -16,9 +16,11 @@ public sealed class LiveStatusDisplay : IDisposable
     private readonly List<(string Label, string Colour)> _order = [];
     private readonly Dictionary<string, TrackState> _states = [];
     private readonly List<Caption> _captions = [];
+    private readonly List<Advice> _advice = [];
     private readonly DateTime _start = DateTime.Now;
     private string _model = "";
     private bool _started;
+    private bool _showAdvice;
     private volatile bool _running;
     private Task? _liveTask;
 
@@ -26,6 +28,7 @@ public sealed class LiveStatusDisplay : IDisposable
     private const int MaxCaptions = 500;
 
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
+    private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
 
     private static bool ConsoleIsUsable()
     {
@@ -53,6 +56,32 @@ public sealed class LiveStatusDisplay : IDisposable
     public void SetState(string label, TrackState state)
     {
         lock (_lock) _states[label] = state;
+    }
+
+    /// <summary>Turn on the coach advice column (rendered to the right of the
+    /// transcript). Call before the dashboard starts.</summary>
+    public void EnableAdvicePanel()
+    {
+        lock (_lock) _showAdvice = true;
+    }
+
+    /// <summary>Add a coach advice item. Presentation hints (colour, glyph) are passed
+    /// in so this class stays independent of the coach namespace.</summary>
+    public void PrintAdvice(DateTime at, string colour, string glyph, string text)
+    {
+        if (!_interactive)
+        {
+            AnsiConsole.MarkupLine($"[grey]{at:HH:mm:ss}[/] [{colour}]coach {glyph}[/] {text.EscapeMarkup()}");
+            return;
+        }
+        lock (_lock)
+        {
+            _advice.Add(new Advice(at, colour, glyph, text));
+            if (_advice.Count > MaxCaptions)
+            {
+                _advice.RemoveRange(0, _advice.Count - MaxCaptions);
+            }
+        }
     }
 
     public void PrintCaption(DateTime at, string colour, string label, string caption)
@@ -134,7 +163,18 @@ public sealed class LiveStatusDisplay : IDisposable
             var footer = new Markup(
                 $"[grey]Enter[/] stop & transcribe     [grey]model[/] {_model.EscapeMarkup()}");
 
-            return new Rows(header, cards, transcript, footer);
+            IRenderable body = transcript;
+            if (_showAdvice)
+            {
+                var advice = new Panel(BuildAdvice())
+                    .Header("[magenta] coach [/]")
+                    .Border(BoxBorder.Rounded)
+                    .BorderColor(Color.Grey)
+                    .Expand();
+                body = new Columns(transcript, advice) { Expand = true };
+            }
+
+            return new Rows(header, cards, body, footer);
         }
     }
 
@@ -169,6 +209,23 @@ public sealed class LiveStatusDisplay : IDisposable
 
         var lines = slice.Select(c =>
             $"[grey]{c.At:HH:mm:ss}[/]  [{c.Colour}]{c.Label,-6}[/] {c.Text.EscapeMarkup()}");
+        return new Markup(string.Join("\n", lines));
+    }
+
+    private IRenderable BuildAdvice()
+    {
+        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        var slice = _advice.Count > visible
+            ? _advice.GetRange(_advice.Count - visible, visible)
+            : _advice;
+
+        if (slice.Count == 0)
+        {
+            return new Markup("[grey](no advice yet…)[/]");
+        }
+
+        var lines = slice.Select(a =>
+            $"[grey]{a.At:HH:mm:ss}[/]  [{a.Colour}]{a.Glyph}[/] {a.Text.EscapeMarkup()}");
         return new Markup(string.Join("\n", lines));
     }
 

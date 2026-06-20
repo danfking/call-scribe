@@ -67,6 +67,14 @@ public sealed class LiveCaptionEngine : IDisposable
     /// <summary>Set dashboard detail (the live model name shown in the footer).</summary>
     public void ConfigureDisplay(string model) => _display.Configure(model);
 
+    /// <summary>Turn on the coach advice column to the right of the transcript.</summary>
+    public void EnableAdvicePanel() => _display.EnableAdvicePanel();
+
+    /// <summary>Forward a coach advice item to the dashboard. Presentation hints are
+    /// passed as primitives so this class stays independent of the coach namespace.</summary>
+    public void PrintAdvice(DateTime at, string colour, string glyph, string text) =>
+        _display.PrintAdvice(at, colour, glyph, text);
+
     public async Task CompleteAsync()
     {
         await Task.WhenAll(_workers).ConfigureAwait(false);
