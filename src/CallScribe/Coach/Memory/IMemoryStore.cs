@@ -11,8 +11,10 @@ public interface IMemoryStore : IAsyncDisposable
     /// <summary>Persist one live caption to the realtime time-series table.</summary>
     Task InsertSegmentAsync(string meetingId, DateTime at, string speaker, string text, CancellationToken ct);
 
-    /// <summary>Embed and store a durable memory for future semantic recall.</summary>
-    Task StoreMemoryAsync(string meetingId, MemoryKind kind, string text, CancellationToken ct);
+    /// <summary>Embed and store a durable memory for future semantic recall.
+    /// <paramref name="person"/> attributes the memory to someone (e.g. a person fact or
+    /// preference) when known, else null.</summary>
+    Task StoreMemoryAsync(string meetingId, MemoryKind kind, string text, string? person, CancellationToken ct);
 
     /// <summary>Return the <paramref name="topK"/> memories closest to <paramref name="query"/>.</summary>
     Task<IReadOnlyList<RecalledMemory>> RecallAsync(string query, int topK, CancellationToken ct);

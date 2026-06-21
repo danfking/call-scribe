@@ -76,6 +76,37 @@ public sealed class AppConfig
     public string PostgresConn { get; set; } =
         "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres";
 
+    // --- Speaker identification (experimental) --------------------------------
+    // Tell apart and name the far-side speakers so the coach reasons per person.
+    // Local acoustic embeddings (sherpa-onnx ONNX models); degrades to the plain
+    // Me/Others labels when the models or native runtime are absent.
+
+    /// <summary>Identify far-side speakers by voice (live labels + after-meeting attribution).
+    /// Off by default; without it the coach sees the plain "Others" label as before.</summary>
+    [JsonPropertyName("speakerIdEnabled")]
+    public bool SpeakerIdEnabled { get; set; }
+
+    /// <summary>Run offline diarization on the Others track after the meeting to attribute
+    /// the saved transcript and consolidated memories. Authoritative over the live guesses.</summary>
+    [JsonPropertyName("diarizeAfterMeeting")]
+    public bool DiarizeAfterMeeting { get; set; } = true;
+
+    /// <summary>Max cosine distance to accept an enrolled voiceprint as a match (smaller =
+    /// stricter). Raise to recognise people more readily at the risk of confusing similar
+    /// voices; lower to only auto-name confident matches.</summary>
+    [JsonPropertyName("voiceprintMaxDistance")]
+    public double VoiceprintMaxDistance { get; set; } = 0.30;
+
+    /// <summary>Filename of the pyannote speaker-segmentation ONNX model under the models
+    /// directory (used by offline diarization to find speech turns).</summary>
+    [JsonPropertyName("speakerSegModel")]
+    public string SpeakerSegModel { get; set; } = "sherpa-onnx-pyannote-segmentation-3-0.onnx";
+
+    /// <summary>Filename of the speaker-embedding ONNX model under the models directory
+    /// (turns a voice slice into a voiceprint). Default is an English TitaNet model.</summary>
+    [JsonPropertyName("speakerEmbedModel")]
+    public string SpeakerEmbedModel { get; set; } = "nemo_en_titanet_small.onnx";
+
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
     public static string ConfigPath => Path.Combine(

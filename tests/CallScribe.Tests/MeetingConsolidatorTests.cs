@@ -15,7 +15,7 @@ public class MeetingConsolidatorTests
     /// <summary>Returns a fixed transcript and captures stored memories.</summary>
     private sealed class CapturingStore(IReadOnlyList<TranscriptLine> transcript) : IMemoryStore
     {
-        public readonly List<(MemoryKind Kind, string Text)> Stored = [];
+        public readonly List<(MemoryKind Kind, string Text, string? Person)> Stored = [];
 
         public Task EnsureSchemaAsync(CancellationToken ct) => Task.CompletedTask;
         public Task InsertSegmentAsync(string m, DateTime at, string s, string t, CancellationToken ct) => Task.CompletedTask;
@@ -26,9 +26,9 @@ public class MeetingConsolidatorTests
         public Task<int> ClearMemoriesAsync(string? m, CancellationToken ct) => Task.FromResult(0);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        public Task StoreMemoryAsync(string m, MemoryKind kind, string text, CancellationToken ct)
+        public Task StoreMemoryAsync(string m, MemoryKind kind, string text, string? person, CancellationToken ct)
         {
-            Stored.Add((kind, text));
+            Stored.Add((kind, text, person));
             return Task.CompletedTask;
         }
     }
@@ -67,6 +67,24 @@ public class MeetingConsolidatorTests
 
         Assert.Equal(0, count);
         Assert.Empty(store.Stored);
+    }
+
+    [Fact]
+    public async Task PersonAttribution_FlowsThrough_AndIsNullWhenOmitted()
+    {
+        var reply = """
+            {"items": [
+              {"kind": "person_fact", "text": "Allergic to peanuts.", "person": "Priya"},
+              {"kind": "decision", "text": "Ship dual-track first."}
+            ]}
+            """;
+        var store = new CapturingStore(SampleTranscript());
+        var consolidator = new MeetingConsolidator(new CannedChat(reply), "llama3.1:8b", store);
+
+        await consolidator.ConsolidateAsync("m1", CancellationToken.None);
+
+        Assert.Equal("Priya", store.Stored[0].Person);
+        Assert.Null(store.Stored[1].Person);
     }
 
     [Fact]

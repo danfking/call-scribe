@@ -86,7 +86,7 @@ public class LlmAdvisorTests
 
         public Task EnsureSchemaAsync(CancellationToken ct) => Task.CompletedTask;
         public Task InsertSegmentAsync(string m, DateTime at, string s, string t, CancellationToken ct) => Task.CompletedTask;
-        public Task StoreMemoryAsync(string m, MemoryKind kind, string t, CancellationToken ct) => Task.CompletedTask;
+        public Task StoreMemoryAsync(string m, MemoryKind kind, string t, string? person, CancellationToken ct) => Task.CompletedTask;
 
         public Task<IReadOnlyList<RecalledMemory>> RecallAsync(string query, int topK, CancellationToken ct)
         {

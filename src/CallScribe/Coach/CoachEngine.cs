@@ -62,7 +62,7 @@ public sealed class CoachEngine : IDisposable
                 try
                 {
                     await _memory.InsertSegmentAsync(
-                        _meetingId, caption.At, caption.Label, caption.Caption, _cts.Token).ConfigureAwait(false);
+                        _meetingId, caption.At, caption.SpeakerName, caption.Caption, _cts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
                 catch { /* swallow: persistence is non-critical to the live loop */ }

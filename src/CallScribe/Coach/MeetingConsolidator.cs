@@ -20,8 +20,12 @@ public sealed class MeetingConsolidator
         filler, and anything only meaningful in the moment. Each memory must make sense on
         its own without the transcript.
 
+        Each transcript line is prefixed with the speaker's name. When a fact is about, or a
+        preference belongs to, a specific named person, set "person" to that name; otherwise
+        omit it. Do not guess a person for general decisions or insights.
+
         Respond with ONLY a JSON object:
-        {"items": [{"kind": "insight"|"decision"|"action_item"|"person_fact"|"preference", "text": "..."}]}
+        {"items": [{"kind": "insight"|"decision"|"action_item"|"person_fact"|"preference", "text": "...", "person": "<name or omit>"}]}
         Return {"items": []} if there is nothing durable worth keeping.
         """;
 
@@ -66,7 +70,9 @@ public sealed class MeetingConsolidator
         foreach (var item in items)
         {
             if (string.IsNullOrWhiteSpace(item.Text)) continue;
-            await _store.StoreMemoryAsync(meetingId, MapKind(item.Kind), item.Text.Trim(), ct).ConfigureAwait(false);
+            var person = string.IsNullOrWhiteSpace(item.Person) ? null : item.Person.Trim();
+            await _store.StoreMemoryAsync(meetingId, MapKind(item.Kind), item.Text.Trim(), person, ct)
+                .ConfigureAwait(false);
             stored++;
         }
         return stored;
@@ -90,5 +96,6 @@ public sealed class MeetingConsolidator
     {
         [JsonPropertyName("kind")] public string? Kind { get; init; }
         [JsonPropertyName("text")] public string? Text { get; init; }
+        [JsonPropertyName("person")] public string? Person { get; init; }
     }
 }

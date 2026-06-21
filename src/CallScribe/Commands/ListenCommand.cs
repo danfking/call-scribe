@@ -3,6 +3,7 @@ using CallScribe.Audio;
 using CallScribe.Coach;
 using CallScribe.Coach.Llm;
 using CallScribe.Coach.Memory;
+using CallScribe.Coach.Speaker;
 using CallScribe.Transcription;
 using Spectre.Console;
 using Whisper.net.Ggml;
@@ -46,6 +47,11 @@ public static class ListenCommand
         {
             Description = "Show the realtime meeting coach panel beside the transcript (experimental).",
         };
+        var speakersOption = new Option<bool>("--speakers")
+        {
+            Description = "Identify far-side speakers by voice: name live captions and attribute the "
+                          + "transcript after the meeting (needs the speaker models; experimental).",
+        };
 
         var command = new Command("listen",
             "Record with live captions on screen; Enter stops, then the full-quality transcription runs");
@@ -56,6 +62,7 @@ public static class ListenCommand
         command.Options.Add(aecOption);
         command.Options.Add(aesOption);
         command.Options.Add(coachOption);
+        command.Options.Add(speakersOption);
         command.SetAction((parseResult, ct) => RunAsync(
             parseResult.GetValue(labelOption),
             parseResult.GetValue(liveModelOption)!,
@@ -64,13 +71,16 @@ public static class ListenCommand
             parseResult.GetValue(aecOption),
             parseResult.GetValue(aesOption),
             parseResult.GetValue(coachOption),
+            parseResult.GetValue(speakersOption),
             ct));
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool aec, int aes, bool coachFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool aec, int aes, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
         var config = AppConfig.Load();
+        // --speakers turns identification on for this run, including the after-meeting pass.
+        if (speakersFlag) config.SpeakerIdEnabled = true;
 
         // Live model is small (~75-466 MB); make sure it's present before capture starts.
         var liveModelPath = await ModelManager.EnsureWhisperModelAsync(
@@ -92,6 +102,14 @@ public static class ListenCommand
             coach = new CoachEngine(advisor, coachMemory, stem);
             coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
             captions.CaptionEmitted += coach.Observe;
+        }
+
+        // Identify far-side speakers so live captions (and the coach) get names, not just
+        // "Others". Degrades to null when off or the models/native runtime are unavailable.
+        var speakerId = await SpeakerIdentity.TryCreateAsync(config, ct).ConfigureAwait(false);
+        if (speakerId != null)
+        {
+            captions.ResolveOthersSpeaker = samples => speakerId.ResolveAsync(samples, ct);
         }
 
         // The dashboard shows the live state; it starts when the first track attaches.
@@ -131,12 +149,21 @@ public static class ListenCommand
             catch { /* consolidation is best-effort; never block the transcript */ }
             await coachMemory.DisposeAsync().ConfigureAwait(false);
         }
+        // Live identification is done; the after-meeting pass builds its own services.
+        if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);
         AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
 
         if (noTranscribe) return 0;
 
         var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
         await TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
+
+        // Authoritative after-meeting attribution: offline diarization is far more accurate
+        // than the live guesser and enrolls newly-named speakers for next time.
+        if (config.SpeakerIdEnabled && config.DiarizeAfterMeeting)
+        {
+            await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct).ConfigureAwait(false);
+        }
         return 0;
     }
 }

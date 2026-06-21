@@ -41,9 +41,12 @@ public sealed class MemoryStore : IMemoryStore, IAsyncDisposable
               meeting_id text NOT NULL,
               kind       text NOT NULL,
               text       text NOT NULL,
+              person     text,
               embedding  vector({_embedder.Dimensions}) NOT NULL,
               created_at timestamptz NOT NULL DEFAULT now()
             );
+            -- Backfill for databases created before the person column existed.
+            ALTER TABLE memories ADD COLUMN IF NOT EXISTS person text;
             CREATE INDEX IF NOT EXISTS memories_embedding_idx
               ON memories USING hnsw (embedding vector_cosine_ops);
             """;
@@ -74,14 +77,15 @@ public sealed class MemoryStore : IMemoryStore, IAsyncDisposable
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task StoreMemoryAsync(string meetingId, MemoryKind kind, string text, CancellationToken ct)
+    public async Task StoreMemoryAsync(string meetingId, MemoryKind kind, string text, string? person, CancellationToken ct)
     {
         var embedding = await _embedder.EmbedAsync(text, EmbedPurpose.Document, ct).ConfigureAwait(false);
         await using var cmd = _dataSource.CreateCommand(
-            "INSERT INTO memories (meeting_id, kind, text, embedding) VALUES ($1, $2, $3, $4)");
+            "INSERT INTO memories (meeting_id, kind, text, person, embedding) VALUES ($1, $2, $3, $4, $5)");
         cmd.Parameters.Add(new NpgsqlParameter { Value = meetingId });
         cmd.Parameters.Add(new NpgsqlParameter { Value = kind.ToString() });
         cmd.Parameters.Add(new NpgsqlParameter { Value = text });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = (object?)person ?? DBNull.Value });
         cmd.Parameters.Add(new NpgsqlParameter { Value = new Vector(embedding) });
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -90,7 +94,7 @@ public sealed class MemoryStore : IMemoryStore, IAsyncDisposable
     {
         var embedding = await _embedder.EmbedAsync(query, EmbedPurpose.Query, ct).ConfigureAwait(false);
         await using var cmd = _dataSource.CreateCommand(
-            "SELECT kind, text, embedding <=> $1 AS distance FROM memories ORDER BY embedding <=> $1 LIMIT $2");
+            "SELECT kind, text, person, embedding <=> $1 AS distance FROM memories ORDER BY embedding <=> $1 LIMIT $2");
         cmd.Parameters.Add(new NpgsqlParameter { Value = new Vector(embedding) });
         cmd.Parameters.Add(new NpgsqlParameter { Value = topK });
 
@@ -99,7 +103,8 @@ public sealed class MemoryStore : IMemoryStore, IAsyncDisposable
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var kind = Enum.TryParse<MemoryKind>(reader.GetString(0), out var k) ? k : MemoryKind.Insight;
-            results.Add(new RecalledMemory(kind, reader.GetString(1), reader.GetDouble(2)));
+            var person = reader.IsDBNull(2) ? null : reader.GetString(2);
+            results.Add(new RecalledMemory(kind, reader.GetString(1), reader.GetDouble(3), person));
         }
         return results;
     }

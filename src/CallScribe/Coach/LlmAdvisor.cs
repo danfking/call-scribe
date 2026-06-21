@@ -18,7 +18,9 @@ public sealed class LlmAdvisor : IAdvisor
     private static readonly string SystemPrompt =
         """
         You are a silent real-time meeting co-pilot for the participant labelled "Me".
-        You see a rolling transcript where "Others" is the far side and "Me" is your user.
+        You see a rolling transcript where "Me" is your user and every other speaker is on
+        the far side, labelled by name when known (e.g. "Gavin") or as "Speaker 1",
+        "Speaker 2", … when not yet identified. Use those names when advising.
         Decide whether a brief, genuinely useful piece of advice or a factual answer would
         help "Me" right now. Advise SPARINGLY — only for a real question to answer, an
         objection to handle, a factual gap worth filling, or a risk worth flagging.
@@ -118,7 +120,7 @@ public sealed class LlmAdvisor : IAdvisor
         sb.AppendLine("Recent transcript:");
         for (var i = start; i < context.Count; i++)
         {
-            sb.Append(context[i].Label).Append(": ").AppendLine(context[i].Caption);
+            sb.Append(context[i].SpeakerName).Append(": ").AppendLine(context[i].Caption);
         }
         sb.AppendLine().Append("Should you advise \"Me\" now? Reply with the JSON object only.");
         return sb.ToString();

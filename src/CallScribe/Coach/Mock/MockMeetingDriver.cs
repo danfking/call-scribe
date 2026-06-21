@@ -8,7 +8,9 @@ namespace CallScribe.Coach.Mock;
 /// Whisper. This is the deterministic harness for verifying the ORPA pipeline
 /// end-to-end. Script format is JSONL, one utterance per line:
 /// <c>{"t": 1.5, "speaker": "Others", "text": "..."}</c> where <c>t</c> is seconds
-/// from the start of the meeting and <c>speaker</c> is "Me" or "Others".</summary>
+/// from the start of the meeting. <c>speaker</c> is "Me", "Others", or a far-side
+/// person's name (e.g. "Gavin") — a name is carried through as the resolved speaker so
+/// named multi-party flows can be exercised without speaker-id audio.</summary>
 public static class MockMeetingDriver
 {
     private sealed record ScriptLine(
@@ -38,14 +40,18 @@ public static class MockMeetingDriver
                 if (wait > TimeSpan.Zero) await Task.Delay(wait, ct).ConfigureAwait(false);
             }
 
-            var (label, colour) =
-                line.Speaker.Equals(LiveCaptionEngine.MeLabel, StringComparison.OrdinalIgnoreCase)
-                    ? (LiveCaptionEngine.MeLabel, "cyan")
-                    : (LiveCaptionEngine.OthersLabel, "yellow");
+            var isMe = line.Speaker.Equals(LiveCaptionEngine.MeLabel, StringComparison.OrdinalIgnoreCase);
+            var label = isMe ? LiveCaptionEngine.MeLabel : LiveCaptionEngine.OthersLabel;
+            var colour = isMe ? "cyan" : "yellow";
+            // A named far-side speaker is carried as the resolved Speaker; "Me"/"Others" are
+            // plain channels with no resolved name.
+            var speaker = isMe || line.Speaker.Equals(LiveCaptionEngine.OthersLabel, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : line.Speaker;
 
             var at = DateTime.Now;
-            display.PrintCaption(at, colour, label, line.Text);
-            coach.Observe(new CaptionEvent(at, label, line.Text));
+            display.PrintCaption(at, colour, speaker ?? label, line.Text);
+            coach.Observe(new CaptionEvent(at, label, line.Text, speaker));
         }
     }
 }

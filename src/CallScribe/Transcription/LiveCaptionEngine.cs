@@ -53,6 +53,12 @@ public sealed class LiveCaptionEngine : IDisposable
     /// Lets a harness or test observe what actually reached the screen.</summary>
     public event Action<CaptionEvent>? CaptionEmitted;
 
+    /// <summary>Optional far-side speaker resolver: given the 16 kHz mono samples of an
+    /// Others caption, returns the name to attribute it to (a known person or "Speaker N").
+    /// Null = no speaker identification, so Others captions keep the generic "Others" label.
+    /// Awaited inline on the Others worker, so it adds to that caption's latency.</summary>
+    public Func<float[], Task<string>>? ResolveOthersSpeaker { get; set; }
+
     public LiveCaptionEngine(string modelPath)
     {
         _factory = WhisperFactory.FromPath(modelPath);
@@ -151,10 +157,12 @@ public sealed class LiveCaptionEngine : IDisposable
             if (label == OthersLabel)
             {
                 // Loopback is authoritative: record so mic-side echoes can be
-                // suppressed, then print immediately.
+                // suppressed, then print immediately. Identify the far-side speaker (if
+                // enabled) so the caption is attributed to a name, not just "Others".
                 _echoFilter.Record(label, caption, spanStart, spanEnd);
-                _display.PrintCaption(spanStart, colour, label, caption);
-                CaptionEmitted?.Invoke(new CaptionEvent(spanStart, label, caption));
+                var speaker = await ResolveSpeakerAsync(buffer, format).ConfigureAwait(false);
+                _display.PrintCaption(spanStart, colour, speaker ?? label, caption);
+                CaptionEmitted?.Invoke(new CaptionEvent(spanStart, label, caption, speaker));
             }
             else
             {
@@ -186,6 +194,24 @@ public sealed class LiveCaptionEngine : IDisposable
             CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption));
         });
         lock (_pendingDecisions) _pendingDecisions.Add(decision);
+    }
+
+    /// <summary>Resolve the far-side speaker for the current Others buffer, or null when no
+    /// resolver is set or it fails (caller then keeps the generic label). Reads the same
+    /// buffer that fed Whisper, before it is cleared in FlushAsync's finally.</summary>
+    private async Task<string?> ResolveSpeakerAsync(MemoryStream buffer, WaveFormat format)
+    {
+        var resolve = ResolveOthersSpeaker;
+        if (resolve == null) return null;
+        try
+        {
+            var samples = ExtractSamples16kMono(buffer, format, PeakAmplitude(buffer, format));
+            return await resolve(samples).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private DateTime OthersResolvedUntil()
@@ -231,6 +257,29 @@ public sealed class LiveCaptionEngine : IDisposable
         WaveFileWriter.WriteWavFileToStream(output, resampled);
         output.Position = 0;
         return output;
+    }
+
+    /// <summary>Like <see cref="ConvertTo16kMonoWav"/> but yields the raw 16 kHz mono
+    /// samples (for speaker embedding) rather than a WAV stream.</summary>
+    private static float[] ExtractSamples16kMono(MemoryStream source, WaveFormat format, float peakAmplitude)
+    {
+        source.Position = 0;
+        using var raw = new RawSourceWaveStream(source, format);
+        ISampleProvider samples = raw.ToSampleProvider();
+        if (format.Channels > 1) samples = samples.ToMono();
+
+        var gain = peakAmplitude > 0 ? Math.Min(0.9f / peakAmplitude, 30f) : 1f;
+        if (gain > 1.05f) samples = new VolumeSampleProvider(samples) { Volume = gain };
+
+        var resampled = new WdlResamplingSampleProvider(samples, 16000);
+        var all = new List<float>();
+        var buffer = new float[16000];
+        int read;
+        while ((read = resampled.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            all.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+        return [.. all];
     }
 
     /// <summary>RMS over the trailing window: low energy = the speaker paused.</summary>
