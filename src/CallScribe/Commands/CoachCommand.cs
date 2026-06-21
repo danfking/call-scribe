@@ -1,4 +1,5 @@
 using System.CommandLine;
+using CallScribe.Audio;
 using CallScribe.Coach;
 using CallScribe.Coach.Llm;
 using CallScribe.Coach.Memory;
@@ -56,6 +57,12 @@ public static class CoachCommand
         var speakers = new Command("speakers", "List the people with an enrolled voiceprint");
         speakers.SetAction((_, ct) => SpeakersAsync(ct));
 
+        var meNameArgument = new Argument<string>("name") { Description = "Your name to enroll your own voice under" };
+        var enrollMe = new Command("enroll-me",
+            "Record your own voice so far-side bleed on your mic is filtered and you are labelled by name");
+        enrollMe.Arguments.Add(meNameArgument);
+        enrollMe.SetAction((parseResult, ct) => EnrollMeAsync(parseResult.GetValue(meNameArgument)!, ct));
+
         var stemArgument = new Argument<string>("stem")
         {
             Description = "Recording stem (name under the recordings dir, or a full path) to attribute",
@@ -78,6 +85,7 @@ public static class CoachCommand
         command.Subcommands.Add(memtest);
         command.Subcommands.Add(forget);
         command.Subcommands.Add(enroll);
+        command.Subcommands.Add(enrollMe);
         command.Subcommands.Add(speakers);
         command.Subcommands.Add(diarize);
         command.Subcommands.Add(forgetVoices);
@@ -132,6 +140,49 @@ public static class CoachCommand
             await store.EnrollAsync(name, embedding, ct).ConfigureAwait(false);
             AnsiConsole.MarkupLine($"[green]Enrolled[/] {name.EscapeMarkup()}.");
             return 0;
+        }
+        finally
+        {
+            embedder.Dispose();
+            await store.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<int> EnrollMeAsync(string name, CancellationToken ct)
+    {
+        var config = AppConfig.Load();
+        var opened = await OpenVoiceprintsAsync(config, ct).ConfigureAwait(false);
+        if (opened == null) return 1;
+        var (embedder, store) = opened.Value;
+        try
+        {
+            var seconds = TimeSpan.FromSeconds(12);
+            AnsiConsole.MarkupLine(
+                $"Recording your voice for [cyan]{seconds.TotalSeconds:F0}s[/] — speak naturally now "
+                + "(read a couple of sentences aloud).");
+
+            var wav = await MicRecorder.RecordToTempWavAsync(config, seconds, ct).ConfigureAwait(false);
+            try
+            {
+                var embedding = embedder.Embed(SpeakerAudio.ReadWav16kMono(wav));
+                if (embedding.Length == 0)
+                {
+                    AnsiConsole.MarkupLine("[red]Clip too short or too quiet[/] to characterise your voice. Try again.");
+                    return 1;
+                }
+
+                await store.EnrollAsync(name, embedding, ct).ConfigureAwait(false);
+                config.SelfSpeakerName = name;
+                config.Save();
+                AnsiConsole.MarkupLine(
+                    $"[green]Enrolled[/] you as {name.EscapeMarkup()}. Far-side bleed on your mic will now be "
+                    + "filtered and your speech labelled by name.");
+                return 0;
+            }
+            finally
+            {
+                try { File.Delete(wav); } catch { /* temp file best-effort */ }
+            }
         }
         finally
         {

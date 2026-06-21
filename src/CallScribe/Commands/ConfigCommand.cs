@@ -15,7 +15,8 @@ public static class ConfigCommand
             Description = "micDevice | loopbackDevice | model | language | outputRoot | keepAudio | "
                           + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
                           + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
-                          + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel",
+                          + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
+                          + "selfSpeakerName | selfMatchMaxDistance",
         };
         var valueArgument = new Argument<string>("value")
         {
@@ -60,6 +61,8 @@ public static class ConfigCommand
         table.AddRow("voiceprintMaxDistance", config.VoiceprintMaxDistance.ToString("0.##"), "0.3");
         table.AddRow("speakerSegModel", config.SpeakerSegModel.EscapeMarkup(), "sherpa-onnx-pyannote-segmentation-3-0.onnx");
         table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
+        table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
+        table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.45");
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]Config file: {AppConfig.ConfigPath.EscapeMarkup()}[/]");
@@ -135,6 +138,12 @@ public static class ConfigCommand
                 break;
             case "speakerembedmodel":
                 config.SpeakerEmbedModel = cleared ? "nemo_en_titanet_small.onnx" : value;
+                break;
+            case "selfspeakername":
+                config.SelfSpeakerName = cleared ? null : value;
+                break;
+            case "selfmatchmaxdistance":
+                config.SelfMatchMaxDistance = cleared ? 0.45 : double.Parse(value);
                 break;
             default:
                 AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");

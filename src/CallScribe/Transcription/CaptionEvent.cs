@@ -15,3 +15,10 @@ public readonly record struct CaptionEvent(DateTime At, string Label, string Cap
     /// and memory attribute the utterance to.</summary>
     public string SpeakerName => Speaker ?? Label;
 }
+
+/// <summary>Verdict for a mic ("Me") caption from self-voice verification.
+/// <see cref="IsBleed"/> true means the voice is clearly not the user (far-side bleed) and
+/// the caption should be suppressed. <see cref="Name"/>, when set, is the user's enrolled
+/// name to display instead of the generic "Me". A no-opinion result is
+/// <c>(IsBleed: false, Name: null)</c> — keep the caption as "Me".</summary>
+public readonly record struct MeSpeakerResult(bool IsBleed, string? Name);

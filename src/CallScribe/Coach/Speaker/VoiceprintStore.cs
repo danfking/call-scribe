@@ -70,6 +70,20 @@ public sealed class VoiceprintStore : IVoiceprintStore
         return new VoiceprintMatch(reader.GetString(0), reader.GetDouble(1));
     }
 
+    public async Task<double?> DistanceToAsync(string personName, IReadOnlyList<float> embedding, CancellationToken ct)
+    {
+        var query = ToArray(embedding);
+        if (query.Length != _dimensions) return null;
+
+        await using var cmd = _dataSource.CreateCommand(
+            "SELECT embedding <=> $1 AS distance FROM voiceprints WHERE person_name = $2");
+        cmd.Parameters.Add(new NpgsqlParameter { Value = new Vector(query) });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = personName });
+
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is double d ? d : null;
+    }
+
     public async Task EnrollAsync(string personName, IReadOnlyList<float> embedding, CancellationToken ct)
     {
         var sample = ToArray(embedding);

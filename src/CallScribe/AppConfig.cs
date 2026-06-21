@@ -107,6 +107,19 @@ public sealed class AppConfig
     [JsonPropertyName("speakerEmbedModel")]
     public string SpeakerEmbedModel { get; set; } = "nemo_en_titanet_small.onnx";
 
+    /// <summary>Your own enrolled voiceprint name (set by `coach enroll-me`). When set, the
+    /// mic track is checked against it: captions in your voice are kept and labelled with
+    /// this name; captions that clearly are not you (far-side bleed) are dropped. Null = no
+    /// self check (mic captions stay "Me", guarded only by the text echo filter).</summary>
+    [JsonPropertyName("selfSpeakerName")]
+    public string? SelfSpeakerName { get; set; }
+
+    /// <summary>Max cosine distance for a mic caption to count as your voice. Looser than
+    /// <see cref="VoiceprintMaxDistance"/> so your own speech is not dropped; raise it if
+    /// your real speech gets suppressed, lower it if far-side bleed still prints as you.</summary>
+    [JsonPropertyName("selfMatchMaxDistance")]
+    public double SelfMatchMaxDistance { get; set; } = 0.45;
+
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
     public static string ConfigPath => Path.Combine(

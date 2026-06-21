@@ -14,6 +14,8 @@ public class SpeakerResolverTests
         public Task EnsureSchemaAsync(CancellationToken ct) => Task.CompletedTask;
         public Task<VoiceprintMatch?> IdentifyAsync(IReadOnlyList<float> e, CancellationToken ct) =>
             Task.FromResult(match);
+        public Task<double?> DistanceToAsync(string person, IReadOnlyList<float> e, CancellationToken ct) =>
+            Task.FromResult<double?>(match is { } m && m.PersonName == person ? m.Distance : null);
         public Task EnrollAsync(string person, IReadOnlyList<float> e, CancellationToken ct)
         {
             Enrolled.Add((person, e as float[] ?? [.. e]));
@@ -81,6 +83,43 @@ public class SpeakerResolverTests
         var resolver = new SpeakerResolver(store: null);
 
         Assert.Equal(LiveCaptionEngine.OthersLabel, resolver.AssignSession([]));
+    }
+}
+
+public class SelfVerificationTests
+{
+    [Fact]
+    public void NullDistance_KeepsAsMe_NoOpinion()
+    {
+        // Self not enrolled, or clip too short to embed: never drop the user's speech.
+        var result = SpeakerIdentity.DecideMe(null, 0.45, "Dan");
+        Assert.False(result.IsBleed);
+        Assert.Null(result.Name);
+    }
+
+    [Fact]
+    public void CloseDistance_KeepsAndLabelsWithName()
+    {
+        var result = SpeakerIdentity.DecideMe(0.20, 0.45, "Dan");
+        Assert.False(result.IsBleed);
+        Assert.Equal("Dan", result.Name);
+    }
+
+    [Fact]
+    public void FarDistance_FlaggedAsBleed()
+    {
+        // Voice clearly isn't the user (far-side bleed on the mic) -> suppress.
+        var result = SpeakerIdentity.DecideMe(0.70, 0.45, "Dan");
+        Assert.True(result.IsBleed);
+        Assert.Null(result.Name);
+    }
+
+    [Fact]
+    public void AtThreshold_CountsAsMe()
+    {
+        var result = SpeakerIdentity.DecideMe(0.45, 0.45, "Dan");
+        Assert.False(result.IsBleed);
+        Assert.Equal("Dan", result.Name);
     }
 }
 

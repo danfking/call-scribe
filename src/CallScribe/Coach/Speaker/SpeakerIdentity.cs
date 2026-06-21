@@ -13,12 +13,18 @@ public sealed class SpeakerIdentity : IAsyncDisposable
     private readonly ISpeakerEmbedder _embedder;
     private readonly SpeakerResolver _resolver;
     private readonly IVoiceprintStore? _voiceprints;
+    private readonly string? _selfName;
+    private readonly double _selfThreshold;
 
-    private SpeakerIdentity(ISpeakerEmbedder embedder, SpeakerResolver resolver, IVoiceprintStore? voiceprints)
+    private SpeakerIdentity(
+        ISpeakerEmbedder embedder, SpeakerResolver resolver, IVoiceprintStore? voiceprints,
+        string? selfName, double selfThreshold)
     {
         _embedder = embedder;
         _resolver = resolver;
         _voiceprints = voiceprints;
+        _selfName = string.IsNullOrWhiteSpace(selfName) ? null : selfName;
+        _selfThreshold = selfThreshold;
     }
 
     /// <summary>Build the live service from config, or null if unavailable.</summary>
@@ -31,7 +37,7 @@ public sealed class SpeakerIdentity : IAsyncDisposable
 
         var voiceprints = await TryCreateVoiceprintsAsync(config, embedder.Dimensions, ct).ConfigureAwait(false);
         var resolver = new SpeakerResolver(voiceprints, config.VoiceprintMaxDistance);
-        return new SpeakerIdentity(embedder, resolver, voiceprints);
+        return new SpeakerIdentity(embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance);
     }
 
     /// <summary>Resolve a far-side caption's 16 kHz mono samples to a speaker name, falling
@@ -41,6 +47,41 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         var embedding = _embedder.Embed(samples16kMono);
         if (embedding.Length == 0) return LiveCaptionEngine.OthersLabel;
         return await _resolver.ResolveAsync(embedding, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Decide whether a mic ("Me") caption is the user's own voice. Returns a
+    /// no-opinion result (keep as "Me") when self isn't enrolled or the clip is too short to
+    /// embed; otherwise keeps it (labelled with the user's name) when it matches the self
+    /// voiceprint, or flags it as bleed to suppress when it clearly doesn't.</summary>
+    public async Task<MeSpeakerResult> VerifyMeAsync(float[] samples16kMono, CancellationToken ct)
+    {
+        if (_selfName == null || _voiceprints == null) return new MeSpeakerResult(false, null);
+
+        var embedding = _embedder.Embed(samples16kMono);
+        if (embedding.Length == 0) return new MeSpeakerResult(false, null); // too short: keep (conservative)
+
+        double? distance;
+        try
+        {
+            distance = await _voiceprints.DistanceToAsync(_selfName, embedding, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            return new MeSpeakerResult(false, null); // store hiccup: never drop the user's speech
+        }
+
+        return DecideMe(distance, _selfThreshold, _selfName);
+    }
+
+    /// <summary>Pure self-verification policy. Conservative: only suppress when we have a
+    /// real distance that exceeds the threshold; a null distance (self not enrolled, or no
+    /// embedding) means "no opinion — keep as Me".</summary>
+    public static MeSpeakerResult DecideMe(double? distanceToSelf, double threshold, string selfName)
+    {
+        if (distanceToSelf is not double d) return new MeSpeakerResult(false, null);
+        return d <= threshold
+            ? new MeSpeakerResult(false, selfName)   // it's you → keep, labelled
+            : new MeSpeakerResult(true, null);        // not you → far-side bleed → suppress
     }
 
     // --- shared creation helpers (also used by enrollment and offline diarization) -----
