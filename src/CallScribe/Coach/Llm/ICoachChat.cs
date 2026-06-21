@@ -6,7 +6,9 @@ namespace CallScribe.Coach.Llm;
 public interface ICoachChat
 {
     /// <summary>Single-shot completion. <paramref name="jsonMode"/> asks the provider to
-    /// constrain output to valid JSON (used for the structured advise/skip decision).</summary>
+    /// constrain output to valid JSON (used for the structured advise/skip decision).
+    /// <paramref name="maxTokens"/> caps the reply length — small for a one-line advice,
+    /// large for end-of-meeting consolidation whose JSON array can be long.</summary>
     Task<string> CompleteAsync(
-        string model, string system, string user, bool jsonMode, CancellationToken ct);
+        string model, string system, string user, bool jsonMode, int maxTokens, CancellationToken ct);
 }

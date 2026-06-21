@@ -29,6 +29,11 @@ public sealed class LiveCaptionEngine : IDisposable
     // this long instead of waiting indefinitely.
     private static readonly TimeSpan FrontierTimeout = TimeSpan.FromSeconds(6);
 
+    // Speaker resolution (embed + voiceprint DB lookup) runs inline on the Others worker;
+    // cap it so a slow or hung database can't stall the live caption preview. On timeout we
+    // fall back to the plain label — the after-meeting pass is the authoritative attribution.
+    private static readonly TimeSpan SpeakerResolveTimeout = TimeSpan.FromSeconds(2);
+
     // Loopback capture level scales with the device volume, so this must sit well
     // below quiet-listening levels while staying above digital silence.
     private const float SilenceRmsThreshold = 0.002f;
@@ -54,10 +59,11 @@ public sealed class LiveCaptionEngine : IDisposable
     public event Action<CaptionEvent>? CaptionEmitted;
 
     /// <summary>Optional far-side speaker resolver: given the 16 kHz mono samples of an
-    /// Others caption, returns the name to attribute it to (a known person or "Speaker N").
-    /// Null = no speaker identification, so Others captions keep the generic "Others" label.
-    /// Awaited inline on the Others worker, so it adds to that caption's latency.</summary>
-    public Func<float[], Task<string>>? ResolveOthersSpeaker { get; set; }
+    /// Others caption and a cancellation token, returns the name to attribute it to (a known
+    /// person or "Speaker N"). Null = no speaker identification, so Others captions keep the
+    /// generic "Others" label. Awaited inline on the Others worker (so it adds to that
+    /// caption's latency) but bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
+    public Func<float[], CancellationToken, Task<string>>? ResolveOthersSpeaker { get; set; }
 
     public LiveCaptionEngine(string modelPath)
     {
@@ -206,7 +212,8 @@ public sealed class LiveCaptionEngine : IDisposable
         try
         {
             var samples = ExtractSamples16kMono(buffer, format, PeakAmplitude(buffer, format));
-            return await resolve(samples).ConfigureAwait(false);
+            using var cts = new CancellationTokenSource(SpeakerResolveTimeout);
+            return await resolve(samples, cts.Token).ConfigureAwait(false);
         }
         catch
         {

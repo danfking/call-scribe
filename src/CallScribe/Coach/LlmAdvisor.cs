@@ -58,7 +58,9 @@ public sealed class LlmAdvisor : IAdvisor
     {
         var recalled = await RecallAsync(latest, ct).ConfigureAwait(false);
         var prompt = BuildPrompt(context, recalled);
-        var raw = await _chat.CompleteAsync(_model, SystemPrompt, prompt, jsonMode: true, ct).ConfigureAwait(false);
+        // A single short JSON advice object; 300 tokens is ample and keeps latency low.
+        var raw = await _chat.CompleteAsync(_model, SystemPrompt, prompt, jsonMode: true, maxTokens: 300, ct)
+            .ConfigureAwait(false);
 
         Decision? decision;
         try

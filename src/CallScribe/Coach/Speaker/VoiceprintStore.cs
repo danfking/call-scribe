@@ -55,9 +55,15 @@ public sealed class VoiceprintStore : IVoiceprintStore
 
     public async Task<VoiceprintMatch?> IdentifyAsync(IReadOnlyList<float> embedding, CancellationToken ct)
     {
+        var query = ToArray(embedding);
+        // A dimension mismatch (e.g. the embed model was swapped after enrollment) would make
+        // the pgvector <=> operator throw; degrade to "no match" so the caller falls back to
+        // session clustering rather than failing the whole pass.
+        if (query.Length != _dimensions) return null;
+
         await using var cmd = _dataSource.CreateCommand(
             "SELECT person_name, embedding <=> $1 AS distance FROM voiceprints ORDER BY embedding <=> $1 LIMIT 1");
-        cmd.Parameters.Add(new NpgsqlParameter { Value = new Vector(ToArray(embedding)) });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = new Vector(query) });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;

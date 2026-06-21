@@ -52,7 +52,9 @@ public sealed class MeetingConsolidator
             transcript.Append(s.Speaker).Append(": ").AppendLine(s.Text);
         }
 
-        var raw = await _chat.CompleteAsync(_model, SystemPrompt, transcript.ToString(), jsonMode: true, ct)
+        // A whole meeting can extract many durable items; give the JSON array room so it is
+        // not truncated mid-object (which would fail to parse and silently drop everything).
+        var raw = await _chat.CompleteAsync(_model, SystemPrompt, transcript.ToString(), jsonMode: true, maxTokens: 2048, ct)
             .ConfigureAwait(false);
 
         Extraction? extraction;

@@ -37,7 +37,7 @@ public static class SpeakerAudio
         int read;
         while ((read = provider.Read(buffer, 0, buffer.Length)) > 0)
         {
-            all.AddRange(buffer.AsSpan(0, read).ToArray());
+            all.AddRange(buffer.AsSpan(0, read));
         }
         return [.. all];
     }

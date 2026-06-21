@@ -8,7 +8,7 @@ public class MeetingConsolidatorTests
 {
     private sealed class CannedChat(string reply) : ICoachChat
     {
-        public Task<string> CompleteAsync(string model, string system, string user, bool jsonMode, CancellationToken ct)
+        public Task<string> CompleteAsync(string model, string system, string user, bool jsonMode, int maxTokens, CancellationToken ct)
             => Task.FromResult(reply);
     }
 

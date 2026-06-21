@@ -22,12 +22,12 @@ public sealed class DiarizationResult
         _names = clusters.ToDictionary(c => c.Index, c => c.Name);
     }
 
-    /// <summary>The speaker name covering a transcript segment, by greatest time overlap with
-    /// a diarized turn; falls back to the generic label when nothing overlaps.</summary>
     /// <summary>Rename a cluster (e.g. after the user names and enrolls an unknown speaker)
     /// so <see cref="SpeakerFor"/> reflects the real name in the rewritten transcript.</summary>
     public void Rename(int clusterIndex, string name) => _names[clusterIndex] = name;
 
+    /// <summary>The speaker name covering a transcript segment, by greatest time overlap with
+    /// a diarized turn; falls back to the generic label when nothing overlaps.</summary>
     public string SpeakerFor(TranscriptSegment segment)
     {
         var bestOverlap = 0.0;

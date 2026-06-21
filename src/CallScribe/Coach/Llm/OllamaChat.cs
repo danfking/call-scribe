@@ -41,7 +41,7 @@ public sealed partial class OllamaChat : ICoachChat
     }
 
     public async Task<string> CompleteAsync(
-        string model, string system, string user, bool jsonMode, CancellationToken ct)
+        string model, string system, string user, bool jsonMode, int maxTokens, CancellationToken ct)
     {
         var request = new ChatRequest
         {
@@ -50,7 +50,7 @@ public sealed partial class OllamaChat : ICoachChat
             Think = false,
             KeepAlive = _keepAlive,
             Format = jsonMode ? "json" : null,
-            Options = new ChatOptions { Temperature = 0.2, NumPredict = 300 },
+            Options = new ChatOptions { Temperature = 0.2, NumPredict = maxTokens },
             Messages =
             [
                 new ChatMessage { Role = "system", Content = system },

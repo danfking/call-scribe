@@ -90,80 +90,91 @@ public static class ListenCommand
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config, aecMic: aec, aecSuppressionLevel: aes);
         using var captions = new LiveCaptionEngine(liveModelPath);
 
-        // The coach watches the same caption stream the dashboard renders. Opt-in via
-        // --coach or config; the stub advisor needs no models, so this works offline.
+        // Created inside the try so a cancellation (Ctrl-C) during capture still disposes
+        // their native (sherpa) and DB-pool handles via the finally.
         CoachEngine? coach = null;
         IMemoryStore? coachMemory = null;
-        if (coachFlag || config.CoachEnabled)
+        SpeakerIdentity? speakerId = null;
+        try
         {
-            coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-            var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: false, coachMemory);
-            captions.EnableAdvicePanel();
-            coach = new CoachEngine(advisor, coachMemory, stem);
-            coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
-            captions.CaptionEmitted += coach.Observe;
-        }
-
-        // Identify far-side speakers so live captions (and the coach) get names, not just
-        // "Others". Degrades to null when off or the models/native runtime are unavailable.
-        var speakerId = await SpeakerIdentity.TryCreateAsync(config, ct).ConfigureAwait(false);
-        if (speakerId != null)
-        {
-            captions.ResolveOthersSpeaker = samples => speakerId.ResolveAsync(samples, ct);
-        }
-
-        // The dashboard shows the live state; it starts when the first track attaches.
-        captions.ConfigureDisplay(liveModel);
-        captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
-        captions.Attach(LiveCaptionEngine.MeLabel, "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
-
-        engine.Start();
-
-        if (seconds is int s)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(s), ct).ConfigureAwait(false);
-        }
-        else
-        {
-            await Task.Run(() => Console.ReadLine(), ct).ConfigureAwait(false);
-        }
-
-        var duration = await engine.StopAsync().ConfigureAwait(false);
-        await captions.CompleteAsync().ConfigureAwait(false);
-        if (coach != null)
-        {
-            // Captions are fully emitted now; drain any advice still in flight.
-            await coach.CompleteAsync().ConfigureAwait(false);
-            coach.Dispose();
-        }
-        if (coachMemory != null)
-        {
-            // Consolidate the meeting into durable memories for future recall.
-            try
+            // The coach watches the same caption stream the dashboard renders. Opt-in via
+            // --coach or config; the stub advisor needs no models, so this works offline.
+            if (coachFlag || config.CoachEnabled)
             {
-                var consolidator = new MeetingConsolidator(
-                    new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, coachMemory);
-                var stored = await consolidator.ConsolidateAsync(stem, ct).ConfigureAwait(false);
-                AnsiConsole.MarkupLine($"[grey]Coach stored {stored} memories from this meeting.[/]");
+                coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
+                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: false, coachMemory);
+                captions.EnableAdvicePanel();
+                coach = new CoachEngine(advisor, coachMemory, stem);
+                coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+                captions.CaptionEmitted += coach.Observe;
             }
-            catch { /* consolidation is best-effort; never block the transcript */ }
-            await coachMemory.DisposeAsync().ConfigureAwait(false);
+
+            // Identify far-side speakers so live captions (and the coach) get names, not just
+            // "Others". Degrades to null when off or the models/native runtime are unavailable.
+            speakerId = await SpeakerIdentity.TryCreateAsync(config, ct).ConfigureAwait(false);
+            if (speakerId != null)
+            {
+                var resolver = speakerId; // non-null capture for the closure
+                captions.ResolveOthersSpeaker = (samples, token) => resolver.ResolveAsync(samples, token);
+            }
+
+            // The dashboard shows the live state; it starts when the first track attaches.
+            captions.ConfigureDisplay(liveModel);
+            captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
+            captions.Attach(LiveCaptionEngine.MeLabel, "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
+
+            engine.Start();
+
+            if (seconds is int s)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(s), ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await Task.Run(() => Console.ReadLine(), ct).ConfigureAwait(false);
+            }
+
+            var duration = await engine.StopAsync().ConfigureAwait(false);
+            await captions.CompleteAsync().ConfigureAwait(false);
+            if (coach != null)
+            {
+                // Captions are fully emitted now; drain any advice still in flight.
+                await coach.CompleteAsync().ConfigureAwait(false);
+            }
+            if (coachMemory != null)
+            {
+                // Consolidate the meeting into durable memories for future recall. Run it on a
+                // fresh token, not the session ct: a stop (Enter/Ctrl-C) cancels ct, and the
+                // end-of-meeting write is exactly the work that should survive the stop.
+                try
+                {
+                    var consolidator = new MeetingConsolidator(
+                        new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, coachMemory);
+                    var stored = await consolidator.ConsolidateAsync(stem, CancellationToken.None).ConfigureAwait(false);
+                    AnsiConsole.MarkupLine($"[grey]Coach stored {stored} memories from this meeting.[/]");
+                }
+                catch { /* consolidation is best-effort; never block the transcript */ }
+            }
+            AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
+
+            if (noTranscribe) return 0;
+
+            var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
+            await TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
+
+            // Authoritative after-meeting attribution: offline diarization is far more accurate
+            // than the live guesser and enrolls newly-named speakers for next time.
+            if (config.SpeakerIdEnabled && config.DiarizeAfterMeeting)
+            {
+                await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct).ConfigureAwait(false);
+            }
+            return 0;
         }
-        // Live identification is done; the after-meeting pass builds its own services.
-        if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);
-        AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
-
-        if (noTranscribe) return 0;
-
-        var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
-        await TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
-
-        // Authoritative after-meeting attribution: offline diarization is far more accurate
-        // than the live guesser and enrolls newly-named speakers for next time.
-        if (config.SpeakerIdEnabled && config.DiarizeAfterMeeting)
+        finally
         {
-            await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct).ConfigureAwait(false);
+            coach?.Dispose();
+            if (coachMemory != null) await coachMemory.DisposeAsync().ConfigureAwait(false);
+            if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);
         }
-        return 0;
     }
 }
