@@ -52,15 +52,22 @@ public static class SpeakerAttributionFlow
 
             if (interactive && voiceprints != null)
             {
-                foreach (var cluster in result.Clusters.Where(c => !c.Enrolled).ToList())
+                // Diarization can over-split one voice into several clusters that the resolver
+                // merged under the same "Speaker N" name; prompt once per distinct name and
+                // apply it to every cluster sharing it (so we don't ask repeatedly, and the
+                // transcript is named consistently).
+                foreach (var sameName in result.Clusters.Where(c => !c.Enrolled).GroupBy(c => c.Name).ToList())
                 {
                     var name = AnsiConsole.Prompt(
-                        new TextPrompt<string>($"Name for [yellow]{cluster.Name}[/] (Enter to skip):")
+                        new TextPrompt<string>($"Name for [yellow]{sameName.Key}[/] (Enter to skip):")
                             .AllowEmpty());
                     if (string.IsNullOrWhiteSpace(name)) continue;
 
-                    await voiceprints.EnrollAsync(name.Trim(), cluster.MeanEmbedding, ct).ConfigureAwait(false);
-                    result.Rename(cluster.Index, name.Trim());
+                    foreach (var cluster in sameName)
+                    {
+                        await voiceprints.EnrollAsync(name.Trim(), cluster.MeanEmbedding, ct).ConfigureAwait(false);
+                        result.Rename(cluster.Index, name.Trim());
+                    }
                     AnsiConsole.MarkupLine($"[green]Enrolled[/] {name.Trim().EscapeMarkup()} for next time.");
                 }
             }
