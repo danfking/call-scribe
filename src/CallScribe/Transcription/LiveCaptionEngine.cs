@@ -29,6 +29,11 @@ public sealed class LiveCaptionEngine : IDisposable
     // this long instead of waiting indefinitely.
     private static readonly TimeSpan FrontierTimeout = TimeSpan.FromSeconds(6);
 
+    // Speaker resolution (embed + voiceprint DB lookup) runs inline on the Others worker;
+    // cap it so a slow or hung database can't stall the live caption preview. On timeout we
+    // fall back to the plain label — the after-meeting pass is the authoritative attribution.
+    private static readonly TimeSpan SpeakerResolveTimeout = TimeSpan.FromSeconds(2);
+
     // Loopback capture level scales with the device volume, so this must sit well
     // below quiet-listening levels while staying above digital silence.
     private const float SilenceRmsThreshold = 0.002f;
@@ -53,6 +58,20 @@ public sealed class LiveCaptionEngine : IDisposable
     /// Lets a harness or test observe what actually reached the screen.</summary>
     public event Action<CaptionEvent>? CaptionEmitted;
 
+    /// <summary>Optional far-side speaker resolver: given the 16 kHz mono samples of an
+    /// Others caption and a cancellation token, returns the name to attribute it to (a known
+    /// person or "Speaker N"). Null = no speaker identification, so Others captions keep the
+    /// generic "Others" label. Awaited inline on the Others worker (so it adds to that
+    /// caption's latency) but bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
+    public Func<float[], CancellationToken, Task<string>>? ResolveOthersSpeaker { get; set; }
+
+    /// <summary>Optional self-voice check for mic captions: given the 16 kHz mono samples and
+    /// a token, decides whether the caption is the user's own voice (keep, optionally with a
+    /// name to display instead of "Me") or far-side bleed (suppress). Null = no check, so mic
+    /// captions stay "Me", guarded only by the text echo filter. Runs on the deferred Me
+    /// decision, bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
+    public Func<float[], CancellationToken, Task<MeSpeakerResult>>? IdentifyMeSpeaker { get; set; }
+
     public LiveCaptionEngine(string modelPath)
     {
         _factory = WhisperFactory.FromPath(modelPath);
@@ -66,6 +85,14 @@ public sealed class LiveCaptionEngine : IDisposable
 
     /// <summary>Set dashboard detail (the live model name shown in the footer).</summary>
     public void ConfigureDisplay(string model) => _display.Configure(model);
+
+    /// <summary>Turn on the coach advice column to the right of the transcript.</summary>
+    public void EnableAdvicePanel() => _display.EnableAdvicePanel();
+
+    /// <summary>Forward a coach advice item to the dashboard. Presentation hints are
+    /// passed as primitives so this class stays independent of the coach namespace.</summary>
+    public void PrintAdvice(DateTime at, string colour, string glyph, string text) =>
+        _display.PrintAdvice(at, colour, glyph, text);
 
     public async Task CompleteAsync()
     {
@@ -143,14 +170,21 @@ public sealed class LiveCaptionEngine : IDisposable
             if (label == OthersLabel)
             {
                 // Loopback is authoritative: record so mic-side echoes can be
-                // suppressed, then print immediately.
+                // suppressed, then print immediately. Identify the far-side speaker (if
+                // enabled) so the caption is attributed to a name, not just "Others".
                 _echoFilter.Record(label, caption, spanStart, spanEnd);
-                _display.PrintCaption(spanStart, colour, label, caption);
-                CaptionEmitted?.Invoke(new CaptionEvent(spanStart, label, caption));
+                var speaker = await ResolveSpeakerAsync(buffer, format).ConfigureAwait(false);
+                _display.PrintCaption(spanStart, colour, speaker ?? label, caption);
+                CaptionEmitted?.Invoke(new CaptionEvent(spanStart, label, caption, speaker));
             }
             else
             {
-                ScheduleMeDecision(caption, colour, spanStart, spanEnd);
+                // Capture the mic samples now (before the buffer is cleared in finally) so the
+                // deferred decision can voiceprint-check whether this is really the user.
+                var samples = IdentifyMeSpeaker != null
+                    ? ExtractSamples16kMono(buffer, format, PeakAmplitude(buffer, format))
+                    : null;
+                ScheduleMeDecision(caption, colour, spanStart, spanEnd, samples);
             }
         }
         finally
@@ -162,8 +196,9 @@ public sealed class LiveCaptionEngine : IDisposable
     }
 
     /// <summary>Hold a Me caption until the Others track has resolved past its span
-    /// (or a safety timeout), then print unless it turns out to be bleed.</summary>
-    private void ScheduleMeDecision(string caption, string colour, DateTime spanStart, DateTime spanEnd)
+    /// (or a safety timeout), then print unless it turns out to be bleed — first by text
+    /// similarity to the far side, then (if a self-voice check is set) by voiceprint.</summary>
+    private void ScheduleMeDecision(string caption, string colour, DateTime spanStart, DateTime spanEnd, float[]? samples)
     {
         var decision = Task.Run(async () =>
         {
@@ -174,10 +209,46 @@ public sealed class LiveCaptionEngine : IDisposable
             }
 
             if (_echoFilter.IsEchoOfOtherTrack(MeLabel, caption, spanStart, spanEnd)) return;
-            _display.PrintCaption(spanStart, colour, MeLabel, caption);
-            CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption));
+
+            // Voiceprint check: drop captions whose voice clearly isn't the user (far-side
+            // bleed the text filter missed), and label confirmed ones with the user's name.
+            string? speaker = null;
+            var verify = IdentifyMeSpeaker;
+            if (verify != null && samples != null)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(SpeakerResolveTimeout);
+                    var verdict = await verify(samples, cts.Token).ConfigureAwait(false);
+                    if (verdict.IsBleed) return;
+                    speaker = verdict.Name;
+                }
+                catch { /* best-effort: keep the caption as Me */ }
+            }
+
+            _display.PrintCaption(spanStart, colour, speaker ?? MeLabel, caption);
+            CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption, speaker));
         });
         lock (_pendingDecisions) _pendingDecisions.Add(decision);
+    }
+
+    /// <summary>Resolve the far-side speaker for the current Others buffer, or null when no
+    /// resolver is set or it fails (caller then keeps the generic label). Reads the same
+    /// buffer that fed Whisper, before it is cleared in FlushAsync's finally.</summary>
+    private async Task<string?> ResolveSpeakerAsync(MemoryStream buffer, WaveFormat format)
+    {
+        var resolve = ResolveOthersSpeaker;
+        if (resolve == null) return null;
+        try
+        {
+            var samples = ExtractSamples16kMono(buffer, format, PeakAmplitude(buffer, format));
+            using var cts = new CancellationTokenSource(SpeakerResolveTimeout);
+            return await resolve(samples, cts.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private DateTime OthersResolvedUntil()
@@ -223,6 +294,29 @@ public sealed class LiveCaptionEngine : IDisposable
         WaveFileWriter.WriteWavFileToStream(output, resampled);
         output.Position = 0;
         return output;
+    }
+
+    /// <summary>Like <see cref="ConvertTo16kMonoWav"/> but yields the raw 16 kHz mono
+    /// samples (for speaker embedding) rather than a WAV stream.</summary>
+    private static float[] ExtractSamples16kMono(MemoryStream source, WaveFormat format, float peakAmplitude)
+    {
+        source.Position = 0;
+        using var raw = new RawSourceWaveStream(source, format);
+        ISampleProvider samples = raw.ToSampleProvider();
+        if (format.Channels > 1) samples = samples.ToMono();
+
+        var gain = peakAmplitude > 0 ? Math.Min(0.9f / peakAmplitude, 30f) : 1f;
+        if (gain > 1.05f) samples = new VolumeSampleProvider(samples) { Volume = gain };
+
+        var resampled = new WdlResamplingSampleProvider(samples, 16000);
+        var all = new List<float>();
+        var buffer = new float[16000];
+        int read;
+        while ((read = resampled.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            all.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+        return [.. all];
     }
 
     /// <summary>RMS over the trailing window: low energy = the speaker paused.</summary>

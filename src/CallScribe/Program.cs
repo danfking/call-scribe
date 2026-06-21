@@ -26,5 +26,6 @@ root.Subcommands.Add(ListenCommand.Create());
 root.Subcommands.Add(TranscribeCommand.Create());
 root.Subcommands.Add(DevicesCommand.Create());
 root.Subcommands.Add(ConfigCommand.Create());
+root.Subcommands.Add(CoachCommand.Create());
 
 return await root.Parse(args).InvokeAsync();

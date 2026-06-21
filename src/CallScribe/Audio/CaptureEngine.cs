@@ -77,7 +77,7 @@ public sealed class CaptureEngine : IDisposable
 
     /// <summary>Match a configured friendly-name substring against active devices,
     /// or fall back to the default communications endpoint.</summary>
-    private static MMDevice ResolveDevice(MMDeviceEnumerator enumerator, DataFlow flow, string? nameSubstring)
+    internal static MMDevice ResolveDevice(MMDeviceEnumerator enumerator, DataFlow flow, string? nameSubstring)
     {
         if (string.IsNullOrWhiteSpace(nameSubstring))
         {

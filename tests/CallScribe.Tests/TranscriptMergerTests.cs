@@ -52,6 +52,25 @@ public class TranscriptMergerTests
     }
 
     [Fact]
+    public void Merge_AppliesPerSegmentOthersSpeakerNames()
+    {
+        var others = new TrackTranscript("Others", 30, [
+            new TranscriptSegment(5.0, 8.0, "Price question here."),
+            new TranscriptSegment(20.0, 24.0, "Different person now."),
+        ]);
+        var me = new TrackTranscript("Me", 30, []);
+
+        // Name far-side segments by start time, as after-meeting diarization would.
+        var path = TranscriptMerger.Merge("2026-06-11-1400", others, me, TempDir,
+            s => s.Start < 10 ? "Gavin" : "Priya");
+        var content = File.ReadAllText(path);
+
+        Assert.Contains("**Gavin** [14:00:05]", content);
+        Assert.Contains("**Priya** [14:00:20]", content);
+        Assert.DoesNotContain("**Others**", content);
+    }
+
+    [Fact]
     public void Merge_SkipsEmptySegments()
     {
         var others = new TrackTranscript("Others", 10, [new TranscriptSegment(1.0, 2.0, "  ")]);

@@ -1,0 +1,24 @@
+# Memory store for the coach: TimescaleDB (realtime transcript hypertable) + pgvector
+# (semantic recall) in one Postgres. The app creates its own schema on first use
+# (CoachFactory.TryCreateMemoryAsync -> MemoryStore.EnsureSchemaAsync), so this only
+# needs to bring the database up.
+#
+#   docker compose -f docker/coach-db.compose.yml up -d
+#
+# Matches the default AppConfig.PostgresConn
+# (Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres).
+services:
+  coach-db:
+    image: timescale/timescaledb-ha:pg17
+    container_name: callscribe-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: callscribe
+    ports:
+      - "5432:5432"
+    volumes:
+      - callscribe-db-data:/home/postgres/pgdata/data
+    restart: unless-stopped
+
+volumes:
+  callscribe-db-data:

@@ -1,0 +1,3 @@
+{"t": 0.0, "speaker": "Others", "text": "Quick follow-up — which database did we settle on for the storage layer?"}
+{"t": 5.0, "speaker": "Me", "text": "Hmm, I don't remember exactly."}
+{"t": 9.0, "speaker": "Others", "text": "And who prefers async written updates instead of calls?"}

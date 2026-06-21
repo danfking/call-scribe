@@ -1,0 +1,6 @@
+{"t": 0.0, "speaker": "Others", "text": "For the storage layer, are we agreed on Postgres with the pgvector extension?"}
+{"t": 4.0, "speaker": "Me", "text": "Yes, let's go with Postgres plus pgvector and TimescaleDB for the memory store."}
+{"t": 9.0, "speaker": "Others", "text": "Good. Can you send the latency benchmark numbers to the platform team by Friday?"}
+{"t": 14.0, "speaker": "Me", "text": "Will do, I'll send the latency benchmarks to the platform team on Friday."}
+{"t": 19.0, "speaker": "Others", "text": "One more thing: Priya prefers async written updates rather than status calls."}
+{"t": 24.0, "speaker": "Me", "text": "Noted, I'll keep Priya in the loop with written updates."}

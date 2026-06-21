@@ -8,11 +8,15 @@ namespace CallScribe.Transcription;
 /// same speaker grouping, same wall-clock timestamps derived from the filename stem.</summary>
 public static class TranscriptMerger
 {
-    public static string Merge(string stem, TrackTranscript others, TrackTranscript me, string outputDir)
+    /// <param name="othersSpeaker">Optional per-segment naming for the Others track (from
+    /// after-meeting diarization); when null every far-side segment is labelled "Others".</param>
+    public static string Merge(
+        string stem, TrackTranscript others, TrackTranscript me, string outputDir,
+        Func<TranscriptSegment, string>? othersSpeaker = null)
     {
         Directory.CreateDirectory(outputDir);
 
-        var merged = others.Segments.Select(s => (Speaker: "Others", Segment: s))
+        var merged = others.Segments.Select(s => (Speaker: othersSpeaker?.Invoke(s) ?? "Others", Segment: s))
             .Concat(me.Segments.Select(s => (Speaker: "Me", Segment: s)))
             .OrderBy(x => x.Segment.Start)
             .ToList();

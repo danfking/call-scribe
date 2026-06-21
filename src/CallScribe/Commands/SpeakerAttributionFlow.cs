@@ -1,0 +1,108 @@
+using CallScribe.Coach.Speaker;
+using CallScribe.Transcription;
+using Spectre.Console;
+
+namespace CallScribe.Commands;
+
+/// <summary>The after-meeting speaker pass: offline-diarize the Others track, rewrite the
+/// merged transcript with per-speaker names, and (interactively) enroll any still-unknown
+/// speakers so they auto-resolve next time. Best-effort and chatty — it degrades with a
+/// note when the models, recording, or database are missing rather than failing the run.</summary>
+public static class SpeakerAttributionFlow
+{
+    public static async Task RunAsync(string stemPath, AppConfig config, bool interactive, CancellationToken ct)
+    {
+        var othersWav = $"{stemPath}.others.wav";
+        var othersJson = $"{stemPath}.others.json";
+        var meJson = $"{stemPath}.me.json";
+        if (!File.Exists(othersWav) || !File.Exists(othersJson) || !File.Exists(meJson))
+        {
+            AnsiConsole.MarkupLine(
+                "[grey]Speaker attribution skipped: recording or transcript missing (needs keepAudio).[/]");
+            return;
+        }
+
+        var embedder = SpeakerIdentity.TryCreateEmbedder(config);
+        using var diarizer = SpeakerIdentity.TryCreateDiarizer(config);
+        if (embedder == null || diarizer == null)
+        {
+            embedder?.Dispose();
+            AnsiConsole.MarkupLine(
+                "[grey]Speaker attribution skipped: speaker models not installed "
+                + "(run scripts/coach-pull-speaker-models.ps1).[/]");
+            return;
+        }
+
+        var voiceprints = await SpeakerIdentity
+            .TryCreateVoiceprintsAsync(config, embedder.Dimensions, ct).ConfigureAwait(false);
+        try
+        {
+            DiarizationResult? result = null;
+            await AnsiConsole.Status().StartAsync("Identifying speakers...", async _ =>
+            {
+                result = await OfflineDiarization
+                    .AttributeAsync(othersWav, config, embedder, diarizer, voiceprints, ct).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+
+            if (result == null)
+            {
+                AnsiConsole.MarkupLine("[grey]No distinct speakers identified.[/]");
+                return;
+            }
+
+            if (interactive && voiceprints != null)
+            {
+                // The full-quality transcription above can take minutes; any Enter presses
+                // during it sit buffered in the console and would instantly auto-skip the
+                // first naming prompt. Drain them so the prompt actually waits for input.
+                DrainInput();
+
+                // Diarization can over-split one voice into several clusters that the resolver
+                // merged under the same "Speaker N" name; prompt once per distinct name and
+                // apply it to every cluster sharing it (so we don't ask repeatedly, and the
+                // transcript is named consistently).
+                foreach (var sameName in result.Clusters.Where(c => !c.Enrolled).GroupBy(c => c.Name).ToList())
+                {
+                    var name = AnsiConsole.Prompt(
+                        new TextPrompt<string>($"Name for [yellow]{sameName.Key}[/] (Enter to skip):")
+                            .AllowEmpty());
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+
+                    foreach (var cluster in sameName)
+                    {
+                        await voiceprints.EnrollAsync(name.Trim(), cluster.MeanEmbedding, ct).ConfigureAwait(false);
+                        result.Rename(cluster.Index, name.Trim());
+                    }
+                    AnsiConsole.MarkupLine($"[green]Enrolled[/] {name.Trim().EscapeMarkup()} for next time.");
+                }
+            }
+
+            // Rewrite the merged transcript with the resolved names.
+            var others = TrackTranscript.Load(othersJson);
+            var me = TrackTranscript.Load(meJson);
+            var stem = Path.GetFileName(stemPath);
+            var path = TranscriptMerger.Merge(stem, others, me, AppPaths.TranscriptsDir, result.SpeakerFor);
+
+            var names = string.Join(", ", result.Clusters.Select(c => c.Name));
+            AnsiConsole.MarkupLine($"[green]Speaker-attributed transcript[/] -> {path.EscapeMarkup()}");
+            AnsiConsole.MarkupLine($"[grey]Far-side speakers: {names.EscapeMarkup()}[/]");
+        }
+        finally
+        {
+            embedder.Dispose();
+            if (voiceprints != null) await voiceprints.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Discard any buffered console keystrokes so a stray Enter (e.g. pressed during
+    /// the slow transcription) doesn't auto-submit the next prompt. No-op if input is
+    /// redirected (piped/non-interactive).</summary>
+    private static void DrainInput()
+    {
+        try
+        {
+            while (!Console.IsInputRedirected && Console.KeyAvailable) Console.ReadKey(intercept: true);
+        }
+        catch { /* console may not support KeyAvailable in some hosts */ }
+    }
+}

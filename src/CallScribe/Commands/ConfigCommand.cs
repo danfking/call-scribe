@@ -12,7 +12,11 @@ public static class ConfigCommand
 
         var keyArgument = new Argument<string>("key")
         {
-            Description = "micDevice | loopbackDevice | model | language | outputRoot | keepAudio",
+            Description = "micDevice | loopbackDevice | model | language | outputRoot | keepAudio | "
+                          + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
+                          + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
+                          + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
+                          + "selfSpeakerName | selfMatchMaxDistance",
         };
         var valueArgument = new Argument<string>("value")
         {
@@ -43,6 +47,22 @@ public static class ConfigCommand
         table.AddRow("language", config.Language, "en");
         table.AddRow("outputRoot", config.OutputRoot ?? "[grey](default)[/]", AppPaths.OutputRoot.EscapeMarkup());
         table.AddRow("keepAudio", config.KeepAudio.ToString().ToLowerInvariant(), "true");
+        table.AddEmptyRow();
+        table.AddRow("coachEnabled", config.CoachEnabled.ToString().ToLowerInvariant(), "false");
+        table.AddRow("ollamaUrl", config.OllamaUrl.EscapeMarkup(), "http://localhost:11434");
+        table.AddRow("fastModel", config.FastModel.EscapeMarkup(), "qwen3:4b");
+        table.AddRow("reasoningModel", config.ReasoningModel.EscapeMarkup(), "llama3.1:8b");
+        table.AddRow("embedModel", config.EmbedModel.EscapeMarkup(), "nomic-embed-text");
+        table.AddRow("coachRecallMaxDistance", config.CoachRecallMaxDistance.ToString("0.##"), "0.35");
+        table.AddRow("postgresConn", "[grey](hidden)[/]", "localhost:5432/callscribe");
+        table.AddEmptyRow();
+        table.AddRow("speakerIdEnabled", config.SpeakerIdEnabled.ToString().ToLowerInvariant(), "false");
+        table.AddRow("diarizeAfterMeeting", config.DiarizeAfterMeeting.ToString().ToLowerInvariant(), "true");
+        table.AddRow("voiceprintMaxDistance", config.VoiceprintMaxDistance.ToString("0.##"), "0.3");
+        table.AddRow("speakerSegModel", config.SpeakerSegModel.EscapeMarkup(), "sherpa-onnx-pyannote-segmentation-3-0.onnx");
+        table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
+        table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
+        table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]Config file: {AppConfig.ConfigPath.EscapeMarkup()}[/]");
@@ -80,6 +100,50 @@ public static class ConfigCommand
                 break;
             case "keepaudio":
                 config.KeepAudio = cleared || bool.Parse(value);
+                break;
+            case "coachenabled":
+                config.CoachEnabled = !cleared && bool.Parse(value);
+                break;
+            case "ollamaurl":
+                config.OllamaUrl = cleared ? "http://localhost:11434" : value;
+                break;
+            case "fastmodel":
+                config.FastModel = cleared ? "qwen3:4b" : value;
+                break;
+            case "reasoningmodel":
+                config.ReasoningModel = cleared ? "llama3.1:8b" : value;
+                break;
+            case "embedmodel":
+                config.EmbedModel = cleared ? "nomic-embed-text" : value;
+                break;
+            case "coachrecallmaxdistance":
+                config.CoachRecallMaxDistance = cleared ? 0.35 : double.Parse(value);
+                break;
+            case "postgresconn":
+                config.PostgresConn = cleared
+                    ? "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres"
+                    : value;
+                break;
+            case "speakeridenabled":
+                config.SpeakerIdEnabled = !cleared && bool.Parse(value);
+                break;
+            case "diarizeaftermeeting":
+                config.DiarizeAfterMeeting = cleared || bool.Parse(value);
+                break;
+            case "voiceprintmaxdistance":
+                config.VoiceprintMaxDistance = cleared ? 0.30 : double.Parse(value);
+                break;
+            case "speakersegmodel":
+                config.SpeakerSegModel = cleared ? "sherpa-onnx-pyannote-segmentation-3-0.onnx" : value;
+                break;
+            case "speakerembedmodel":
+                config.SpeakerEmbedModel = cleared ? "nemo_en_titanet_small.onnx" : value;
+                break;
+            case "selfspeakername":
+                config.SelfSpeakerName = cleared ? null : value;
+                break;
+            case "selfmatchmaxdistance":
+                config.SelfMatchMaxDistance = cleared ? 0.6 : double.Parse(value);
                 break;
             default:
                 AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");
