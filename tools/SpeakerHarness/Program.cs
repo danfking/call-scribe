@@ -154,6 +154,29 @@ else
         Report("different voice is NOT accepted as the enrolled person", otherRejected);
         pass &= sameAccepted && otherRejected;
 
+        // --- 5. Self-verification: enrolled voice kept (named), other voice flagged bleed --
+        // Mirrors the live Me-track check: enroll voice A as "self", then a held-out A clip
+        // should verify as self and a B clip should be flagged far-side bleed.
+        Console.WriteLine("\n[5] Self-voice verification (Me-track bleed filter):");
+        const string self = "Harness-Self";
+        await voiceprints.ForgetAsync(self, CancellationToken.None);
+        await voiceprints.EnrollAsync(self, embeddings["A1"], CancellationToken.None);
+        const double selfThreshold = 0.45;
+
+        var dSelf = await voiceprints.DistanceToAsync(self, embeddings["A2"], CancellationToken.None);
+        var dOther = await voiceprints.DistanceToAsync(self, embeddings["B1"], CancellationToken.None);
+        var selfVerdict = SpeakerIdentity.DecideMe(dSelf, selfThreshold, self);
+        var otherVerdict = SpeakerIdentity.DecideMe(dOther, selfThreshold, self);
+        Console.WriteLine($"    held-out A2 -> distance {dSelf:F3}, verdict {(selfVerdict.IsBleed ? "BLEED" : $"keep as {selfVerdict.Name}")}");
+        Console.WriteLine($"    B1          -> distance {dOther:F3}, verdict {(otherVerdict.IsBleed ? "BLEED" : $"keep as {otherVerdict.Name}")}");
+
+        var selfKept = !selfVerdict.IsBleed && selfVerdict.Name == self;
+        var otherDropped = otherVerdict.IsBleed;
+        Report("my own voice is kept and labelled", selfKept);
+        Report("the other voice (bleed) is suppressed on my mic", otherDropped);
+        pass &= selfKept && otherDropped;
+
+        await voiceprints.ForgetAsync(self, CancellationToken.None);
         await voiceprints.ForgetAsync(person, CancellationToken.None);
     }
 }

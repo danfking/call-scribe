@@ -116,6 +116,9 @@ public static class ListenCommand
             {
                 var resolver = speakerId; // non-null capture for the closure
                 captions.ResolveOthersSpeaker = (samples, token) => resolver.ResolveAsync(samples, token);
+                // Drop far-side bleed that lands on the mic and label the user's own voice
+                // (no-op until they enroll with `coach enroll-me`).
+                captions.IdentifyMeSpeaker = (samples, token) => resolver.VerifyMeAsync(samples, token);
             }
 
             // The dashboard shows the live state; it starts when the first track attaches.

@@ -16,6 +16,11 @@ public interface IVoiceprintStore : IAsyncDisposable
     /// enrolled. The caller decides whether the distance is close enough to trust.</summary>
     Task<VoiceprintMatch?> IdentifyAsync(IReadOnlyList<float> embedding, CancellationToken ct);
 
+    /// <summary>Cosine distance from <paramref name="embedding"/> to one specific person's
+    /// voiceprint, or null if that person isn't enrolled. Used to verify "is this me?" rather
+    /// than "who is the nearest of everyone?".</summary>
+    Task<double?> DistanceToAsync(string personName, IReadOnlyList<float> embedding, CancellationToken ct);
+
     /// <summary>Enroll a sample for a person, folding it into their averaged voiceprint
     /// (creating the person on first enrollment).</summary>
     Task EnrollAsync(string personName, IReadOnlyList<float> embedding, CancellationToken ct);

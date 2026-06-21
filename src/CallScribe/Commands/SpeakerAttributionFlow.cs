@@ -52,15 +52,27 @@ public static class SpeakerAttributionFlow
 
             if (interactive && voiceprints != null)
             {
-                foreach (var cluster in result.Clusters.Where(c => !c.Enrolled).ToList())
+                // The full-quality transcription above can take minutes; any Enter presses
+                // during it sit buffered in the console and would instantly auto-skip the
+                // first naming prompt. Drain them so the prompt actually waits for input.
+                DrainInput();
+
+                // Diarization can over-split one voice into several clusters that the resolver
+                // merged under the same "Speaker N" name; prompt once per distinct name and
+                // apply it to every cluster sharing it (so we don't ask repeatedly, and the
+                // transcript is named consistently).
+                foreach (var sameName in result.Clusters.Where(c => !c.Enrolled).GroupBy(c => c.Name).ToList())
                 {
                     var name = AnsiConsole.Prompt(
-                        new TextPrompt<string>($"Name for [yellow]{cluster.Name}[/] (Enter to skip):")
+                        new TextPrompt<string>($"Name for [yellow]{sameName.Key}[/] (Enter to skip):")
                             .AllowEmpty());
                     if (string.IsNullOrWhiteSpace(name)) continue;
 
-                    await voiceprints.EnrollAsync(name.Trim(), cluster.MeanEmbedding, ct).ConfigureAwait(false);
-                    result.Rename(cluster.Index, name.Trim());
+                    foreach (var cluster in sameName)
+                    {
+                        await voiceprints.EnrollAsync(name.Trim(), cluster.MeanEmbedding, ct).ConfigureAwait(false);
+                        result.Rename(cluster.Index, name.Trim());
+                    }
                     AnsiConsole.MarkupLine($"[green]Enrolled[/] {name.Trim().EscapeMarkup()} for next time.");
                 }
             }
@@ -80,5 +92,17 @@ public static class SpeakerAttributionFlow
             embedder.Dispose();
             if (voiceprints != null) await voiceprints.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Discard any buffered console keystrokes so a stray Enter (e.g. pressed during
+    /// the slow transcription) doesn't auto-submit the next prompt. No-op if input is
+    /// redirected (piped/non-interactive).</summary>
+    private static void DrainInput()
+    {
+        try
+        {
+            while (!Console.IsInputRedirected && Console.KeyAvailable) Console.ReadKey(intercept: true);
+        }
+        catch { /* console may not support KeyAvailable in some hosts */ }
     }
 }

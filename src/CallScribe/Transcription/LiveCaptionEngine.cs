@@ -65,6 +65,13 @@ public sealed class LiveCaptionEngine : IDisposable
     /// caption's latency) but bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
     public Func<float[], CancellationToken, Task<string>>? ResolveOthersSpeaker { get; set; }
 
+    /// <summary>Optional self-voice check for mic captions: given the 16 kHz mono samples and
+    /// a token, decides whether the caption is the user's own voice (keep, optionally with a
+    /// name to display instead of "Me") or far-side bleed (suppress). Null = no check, so mic
+    /// captions stay "Me", guarded only by the text echo filter. Runs on the deferred Me
+    /// decision, bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
+    public Func<float[], CancellationToken, Task<MeSpeakerResult>>? IdentifyMeSpeaker { get; set; }
+
     public LiveCaptionEngine(string modelPath)
     {
         _factory = WhisperFactory.FromPath(modelPath);
@@ -172,7 +179,12 @@ public sealed class LiveCaptionEngine : IDisposable
             }
             else
             {
-                ScheduleMeDecision(caption, colour, spanStart, spanEnd);
+                // Capture the mic samples now (before the buffer is cleared in finally) so the
+                // deferred decision can voiceprint-check whether this is really the user.
+                var samples = IdentifyMeSpeaker != null
+                    ? ExtractSamples16kMono(buffer, format, PeakAmplitude(buffer, format))
+                    : null;
+                ScheduleMeDecision(caption, colour, spanStart, spanEnd, samples);
             }
         }
         finally
@@ -184,8 +196,9 @@ public sealed class LiveCaptionEngine : IDisposable
     }
 
     /// <summary>Hold a Me caption until the Others track has resolved past its span
-    /// (or a safety timeout), then print unless it turns out to be bleed.</summary>
-    private void ScheduleMeDecision(string caption, string colour, DateTime spanStart, DateTime spanEnd)
+    /// (or a safety timeout), then print unless it turns out to be bleed — first by text
+    /// similarity to the far side, then (if a self-voice check is set) by voiceprint.</summary>
+    private void ScheduleMeDecision(string caption, string colour, DateTime spanStart, DateTime spanEnd, float[]? samples)
     {
         var decision = Task.Run(async () =>
         {
@@ -196,8 +209,25 @@ public sealed class LiveCaptionEngine : IDisposable
             }
 
             if (_echoFilter.IsEchoOfOtherTrack(MeLabel, caption, spanStart, spanEnd)) return;
-            _display.PrintCaption(spanStart, colour, MeLabel, caption);
-            CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption));
+
+            // Voiceprint check: drop captions whose voice clearly isn't the user (far-side
+            // bleed the text filter missed), and label confirmed ones with the user's name.
+            string? speaker = null;
+            var verify = IdentifyMeSpeaker;
+            if (verify != null && samples != null)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(SpeakerResolveTimeout);
+                    var verdict = await verify(samples, cts.Token).ConfigureAwait(false);
+                    if (verdict.IsBleed) return;
+                    speaker = verdict.Name;
+                }
+                catch { /* best-effort: keep the caption as Me */ }
+            }
+
+            _display.PrintCaption(spanStart, colour, speaker ?? MeLabel, caption);
+            CaptionEmitted?.Invoke(new CaptionEvent(spanStart, MeLabel, caption, speaker));
         });
         lock (_pendingDecisions) _pendingDecisions.Add(decision);
     }
