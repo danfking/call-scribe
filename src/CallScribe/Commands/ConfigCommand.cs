@@ -62,7 +62,7 @@ public static class ConfigCommand
         table.AddRow("speakerSegModel", config.SpeakerSegModel.EscapeMarkup(), "sherpa-onnx-pyannote-segmentation-3-0.onnx");
         table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
         table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
-        table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.45");
+        table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]Config file: {AppConfig.ConfigPath.EscapeMarkup()}[/]");
@@ -143,7 +143,7 @@ public static class ConfigCommand
                 config.SelfSpeakerName = cleared ? null : value;
                 break;
             case "selfmatchmaxdistance":
-                config.SelfMatchMaxDistance = cleared ? 0.45 : double.Parse(value);
+                config.SelfMatchMaxDistance = cleared ? 0.6 : double.Parse(value);
                 break;
             default:
                 AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");

@@ -114,11 +114,12 @@ public sealed class AppConfig
     [JsonPropertyName("selfSpeakerName")]
     public string? SelfSpeakerName { get; set; }
 
-    /// <summary>Max cosine distance for a mic caption to count as your voice. Looser than
-    /// <see cref="VoiceprintMaxDistance"/> so your own speech is not dropped; raise it if
-    /// your real speech gets suppressed, lower it if far-side bleed still prints as you.</summary>
+    /// <summary>Max cosine distance for a mic caption to count as your voice. Deliberately
+    /// loose (live mic clips, especially with far-side bleed mixed in on speakers, sit well
+    /// above clean-room distances) so your own speech is not dropped; raise it if your real
+    /// speech still gets suppressed, lower it if far-side bleed prints as you.</summary>
     [JsonPropertyName("selfMatchMaxDistance")]
-    public double SelfMatchMaxDistance { get; set; } = 0.45;
+    public double SelfMatchMaxDistance { get; set; } = 0.6;
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
