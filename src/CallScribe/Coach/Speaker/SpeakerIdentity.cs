@@ -60,7 +60,13 @@ public sealed class SpeakerIdentity : IAsyncDisposable
 
         if (_voiceprints != null)
         {
-            try { await _voiceprints.EnrollAsync(newName, centroid, ct).ConfigureAwait(false); }
+            try
+            {
+                // If the current label was an enrolled person, move their stored voiceprint to
+                // the new name; otherwise enroll the new name from the live session centroid.
+                var moved = await _voiceprints.RenameAsync(currentLabel, newName, ct).ConfigureAwait(false);
+                if (!moved) await _voiceprints.EnrollAsync(newName, centroid, ct).ConfigureAwait(false);
+            }
             catch { /* the live rename still applies even if persistence fails */ }
         }
         return true;

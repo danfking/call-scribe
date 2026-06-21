@@ -54,7 +54,9 @@ public sealed class SpeakerResolver
             try
             {
                 var match = await _store.IdentifyAsync(embedding, ct).ConfigureAwait(false);
-                if (match is { } hit && hit.Distance <= _enrolledMaxDistance) return hit.PersonName;
+                // Register the enrolled match as a session speaker too, so its live label is
+                // consistent and can be renamed like any other (e.g. /rename "Joe" "Bob").
+                if (match is { } hit && hit.Distance <= _enrolledMaxDistance) return TrackSession(hit.PersonName, embedding);
             }
             catch { /* fall through to session clustering */ }
         }
@@ -91,6 +93,26 @@ public sealed class SpeakerResolver
 
             var label = $"Speaker {_nextSpeaker++}";
             _session.Add(new SessionSpeaker(label, embedding));
+            return label;
+        }
+    }
+
+    /// <summary>Register or update a session speaker under a known name (an enrolled match) so
+    /// its live label is renameable like any session speaker. Returns the label.</summary>
+    private string TrackSession(string label, float[] embedding)
+    {
+        lock (_lock)
+        {
+            var speaker = _session.FirstOrDefault(s => s.Label == label);
+            if (speaker != null)
+            {
+                speaker.Centroid = VectorMath.RunningMean(speaker.Centroid, speaker.Count, embedding);
+                speaker.Count++;
+            }
+            else
+            {
+                _session.Add(new SessionSpeaker(label, embedding));
+            }
             return label;
         }
     }

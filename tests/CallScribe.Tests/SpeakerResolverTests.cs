@@ -21,6 +21,7 @@ public class SpeakerResolverTests
             Enrolled.Add((person, e as float[] ?? [.. e]));
             return Task.CompletedTask;
         }
+        public Task<bool> RenameAsync(string oldName, string newName, CancellationToken ct) => Task.FromResult(false);
         public Task<IReadOnlyList<string>> ListPeopleAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<string>>([]);
         public Task<int> ForgetAsync(string? person, CancellationToken ct) => Task.FromResult(0);
@@ -102,6 +103,20 @@ public class SpeakerResolverTests
     {
         var resolver = new SpeakerResolver(store: null);
         Assert.Null(resolver.Rename("Speaker 9", "Nobody"));
+    }
+
+    [Fact]
+    public async Task EnrolledMatch_IsRegisteredInSession_SoItCanBeRenamed()
+    {
+        // Regression: a speaker recognised from the voiceprint store ("Joe") must still be
+        // renameable live (/rename "Joe" "Bob"), which needs a session entry to exist.
+        var store = new FakeVoiceprints(new VoiceprintMatch("Joe", 0.10));
+        var resolver = new SpeakerResolver(store, enrolledMaxDistance: 0.30);
+
+        var name = await resolver.ResolveAsync([1f, 0f, 0f], CancellationToken.None);
+        Assert.Equal("Joe", name);
+
+        Assert.NotNull(resolver.Rename("Joe", "Bob"));
     }
 }
 

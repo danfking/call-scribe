@@ -25,6 +25,10 @@ public interface IVoiceprintStore : IAsyncDisposable
     /// (creating the person on first enrollment).</summary>
     Task EnrollAsync(string personName, IReadOnlyList<float> embedding, CancellationToken ct);
 
+    /// <summary>Rename an enrolled person's voiceprint (e.g. a live /rename), replacing any
+    /// existing print under the new name. Returns false if no print existed under the old name.</summary>
+    Task<bool> RenameAsync(string oldName, string newName, CancellationToken ct);
+
     /// <summary>Names of everyone with an enrolled voiceprint, alphabetical.</summary>
     Task<IReadOnlyList<string>> ListPeopleAsync(CancellationToken ct);
 
