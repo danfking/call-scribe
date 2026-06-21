@@ -71,6 +71,19 @@ public class TranscriptMergerTests
     }
 
     [Fact]
+    public void Merge_UsesMeSpeakerLabelWhenGiven()
+    {
+        var others = new TrackTranscript("Others", 10, []);
+        var me = new TrackTranscript("Me", 10, [new TranscriptSegment(1.0, 2.0, "My line.")]);
+
+        var path = TranscriptMerger.Merge("2026-06-11-1400", others, me, TempDir, othersSpeaker: null, meSpeaker: "Dan");
+        var content = File.ReadAllText(path);
+
+        Assert.Contains("**Dan**", content);
+        Assert.DoesNotContain("**Me**", content);
+    }
+
+    [Fact]
     public void Merge_SkipsEmptySegments()
     {
         var others = new TrackTranscript("Others", 10, [new TranscriptSegment(1.0, 2.0, "  ")]);
