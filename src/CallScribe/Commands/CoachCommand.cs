@@ -12,6 +12,16 @@ namespace CallScribe.Commands;
 
 public static class CoachCommand
 {
+    /// <summary>Read aloud during `enroll-me` so the user has continuous, natural speech to
+    /// utter rather than pausing to invent words. The opening of the Rainbow Passage (public
+    /// domain, phonetically rich); longer than ~12s of reading so the mic window always has
+    /// voiced speech and recording stops before the passage runs out.</summary>
+    private const string EnrollmentPassage =
+        "When the sunlight strikes raindrops in the air, they act as a prism and form a "
+        + "rainbow. The rainbow is a division of white light into many beautiful colours. "
+        + "These take the shape of a long, round arch, with its path high above and its two "
+        + "ends apparently beyond the horizon.";
+
     public static Command Create()
     {
         var scriptArgument = new Argument<string>("script")
@@ -158,8 +168,9 @@ public static class CoachCommand
         {
             var seconds = TimeSpan.FromSeconds(12);
             AnsiConsole.MarkupLine(
-                $"Recording your voice for [cyan]{seconds.TotalSeconds:F0}s[/] — speak naturally now "
-                + "(read a couple of sentences aloud).");
+                $"Recording your voice for [cyan]{seconds.TotalSeconds:F0}s[/]. Read this aloud at a natural pace "
+                + "(keep going if you reach the end, recording stops on its own):");
+            AnsiConsole.MarkupLine($"\n  [italic]{EnrollmentPassage}[/]\n");
 
             var wav = await MicRecorder.RecordToTempWavAsync(config, seconds, ct).ConfigureAwait(false);
             try
@@ -173,10 +184,20 @@ public static class CoachCommand
 
                 await store.EnrollAsync(name, embedding, ct).ConfigureAwait(false);
                 config.SelfSpeakerName = name;
+                // Enrolling yourself is a clear signal to use voice identification, so arm it.
+                // The Me-track self-check is gated behind SpeakerIdEnabled (SpeakerIdentity
+                // .TryCreateAsync returns null when it is off), so without this enroll-me would
+                // be a silent no-op until the user separately flipped the flag. See #24.
+                var enabledNow = !config.SpeakerIdEnabled;
+                config.SpeakerIdEnabled = true;
                 config.Save();
                 AnsiConsole.MarkupLine(
                     $"[green]Enrolled[/] you as {name.EscapeMarkup()}. Far-side bleed on your mic will now be "
                     + "filtered and your speech labelled by name.");
+                if (enabledNow)
+                {
+                    AnsiConsole.MarkupLine("[grey]Speaker identification enabled (speakerIdEnabled = true).[/]");
+                }
                 return 0;
             }
             finally
