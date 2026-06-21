@@ -1,3 +1,4 @@
+using CallScribe.Coach.Llm;
 using CallScribe.Coach.Speaker;
 using CallScribe.Transcription;
 using Spectre.Console;
@@ -50,6 +51,10 @@ public static class SpeakerAttributionFlow
                 return;
             }
 
+            // Pre-fill the prompts from how speakers introduced themselves ("I'm Sammy").
+            var others = TrackTranscript.Load(othersJson);
+            var suggestions = await SuggestNamesAsync(others, result, config, ct).ConfigureAwait(false);
+
             if (interactive && voiceprints != null)
             {
                 // The full-quality transcription above can take minutes; any Enter presses
@@ -63,9 +68,13 @@ public static class SpeakerAttributionFlow
                 // transcript is named consistently).
                 foreach (var sameName in result.Clusters.Where(c => !c.Enrolled).GroupBy(c => c.Name).ToList())
                 {
-                    var name = AnsiConsole.Prompt(
-                        new TextPrompt<string>($"Name for [yellow]{sameName.Key}[/] (Enter to skip):")
-                            .AllowEmpty());
+                    var suggested = suggestions.GetValueOrDefault(sameName.Key);
+                    var prompt = new TextPrompt<string>(
+                        $"Name for [yellow]{sameName.Key}[/] (Enter to {(suggested != null ? "accept" : "skip")}):")
+                        .AllowEmpty();
+                    if (suggested != null) prompt.DefaultValue(suggested);
+
+                    var name = AnsiConsole.Prompt(prompt);
                     if (string.IsNullOrWhiteSpace(name)) continue;
 
                     foreach (var cluster in sameName)
@@ -78,7 +87,6 @@ public static class SpeakerAttributionFlow
             }
 
             // Rewrite the merged transcript with the resolved names.
-            var others = TrackTranscript.Load(othersJson);
             var me = TrackTranscript.Load(meJson);
             var stem = Path.GetFileName(stemPath);
             var path = TranscriptMerger.Merge(stem, others, me, AppPaths.TranscriptsDir, result.SpeakerFor);
@@ -92,6 +100,40 @@ public static class SpeakerAttributionFlow
             embedder.Dispose();
             if (voiceprints != null) await voiceprints.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Suggest names for far-side speakers from their self-introductions: regex over
+    /// the attributed transcript first, then an Ollama pass for any speaker the regex missed.
+    /// Best-effort — returns whatever it found; an unreachable model just yields fewer hits.</summary>
+    private static async Task<IReadOnlyDictionary<string, string>> SuggestNamesAsync(
+        TrackTranscript others, DiarizationResult result, AppConfig config, CancellationToken ct)
+    {
+        var lines = others.Segments
+            .Where(s => !string.IsNullOrWhiteSpace(s.Text))
+            .Select(s => (Speaker: result.SpeakerFor(s), s.Text))
+            .ToList();
+        if (lines.Count == 0) return new Dictionary<string, string>();
+
+        var suggestions = new Dictionary<string, string>(SpeakerNameExtractor.DetectRegex(lines));
+
+        // LLM fallback only for far-side speakers the regex didn't name.
+        var unnamed = lines.Select(l => l.Speaker)
+            .Where(s => s != LiveCaptionEngine.OthersLabel && !suggestions.ContainsKey(s))
+            .ToHashSet();
+        if (unnamed.Count > 0)
+        {
+            var chat = new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive);
+            if (chat.IsReachable())
+            {
+                var llm = await SpeakerNameExtractor
+                    .ExtractWithLlmAsync(chat, config.ReasoningModel, lines, ct).ConfigureAwait(false);
+                foreach (var (speaker, name) in llm)
+                {
+                    if (unnamed.Contains(speaker)) suggestions[speaker] = name;
+                }
+            }
+        }
+        return suggestions;
     }
 
     /// <summary>Discard any buffered console keystrokes so a stray Enter (e.g. pressed during
