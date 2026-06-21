@@ -10,14 +10,16 @@ public static class TranscriptMerger
 {
     /// <param name="othersSpeaker">Optional per-segment naming for the Others track (from
     /// after-meeting diarization); when null every far-side segment is labelled "Others".</param>
+    /// <param name="meSpeaker">Label for the near (mic) track; defaults to "Me", overridden
+    /// with the user's name once their voice is enrolled.</param>
     public static string Merge(
         string stem, TrackTranscript others, TrackTranscript me, string outputDir,
-        Func<TranscriptSegment, string>? othersSpeaker = null)
+        Func<TranscriptSegment, string>? othersSpeaker = null, string meSpeaker = "Me")
     {
         Directory.CreateDirectory(outputDir);
 
         var merged = others.Segments.Select(s => (Speaker: othersSpeaker?.Invoke(s) ?? "Others", Segment: s))
-            .Concat(me.Segments.Select(s => (Speaker: "Me", Segment: s)))
+            .Concat(me.Segments.Select(s => (Speaker: meSpeaker, Segment: s)))
             .OrderBy(x => x.Segment.Start)
             .ToList();
 

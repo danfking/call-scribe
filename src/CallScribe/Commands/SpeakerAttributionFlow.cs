@@ -14,6 +14,7 @@ public static class SpeakerAttributionFlow
     public static async Task RunAsync(string stemPath, AppConfig config, bool interactive, CancellationToken ct)
     {
         var othersWav = $"{stemPath}.others.wav";
+        var meWav = $"{stemPath}.me.wav";
         var othersJson = $"{stemPath}.others.json";
         var meJson = $"{stemPath}.me.json";
         if (!File.Exists(othersWav) || !File.Exists(othersJson) || !File.Exists(meJson))
@@ -86,10 +87,20 @@ public static class SpeakerAttributionFlow
                 }
             }
 
-            // Rewrite the merged transcript with the resolved names.
+            // The batch pass transcribes the raw mic, which on speakers contains far-side
+            // bleed; drop the Me segments that aren't the enrolled self voice (same check the
+            // live path uses) so the saved transcript matches what was shown on screen.
             var me = TrackTranscript.Load(meJson);
+            var (meFiltered, meLabel, dropped) =
+                await FilterMeBleedAsync(me, meWav, config, embedder, voiceprints, ct).ConfigureAwait(false);
+            if (dropped > 0)
+            {
+                AnsiConsole.MarkupLine($"[grey]Dropped {dropped} far-side bleed segment(s) from the Me track.[/]");
+            }
+
+            // Rewrite the merged transcript with the resolved names.
             var stem = Path.GetFileName(stemPath);
-            var path = TranscriptMerger.Merge(stem, others, me, AppPaths.TranscriptsDir, result.SpeakerFor);
+            var path = TranscriptMerger.Merge(stem, others, meFiltered, AppPaths.TranscriptsDir, result.SpeakerFor, meLabel);
 
             var names = string.Join(", ", result.Clusters.Select(c => c.Name));
             AnsiConsole.MarkupLine($"[green]Speaker-attributed transcript[/] -> {path.EscapeMarkup()}");
@@ -100,6 +111,43 @@ public static class SpeakerAttributionFlow
             embedder.Dispose();
             if (voiceprints != null) await voiceprints.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Drop Me-track segments that are far-side bleed (not the enrolled self voice),
+    /// using the same voiceprint check as the live path, and label the kept ones with the self
+    /// name. No-op (returns the track unchanged, labelled "Me") when self isn't enrolled, the
+    /// voiceprint store is unavailable, or the mic WAV is missing. Returns the filtered track,
+    /// the label to show, and how many segments were dropped.</summary>
+    private static async Task<(TrackTranscript Track, string Label, int Dropped)> FilterMeBleedAsync(
+        TrackTranscript me, string meWav, AppConfig config, ISpeakerEmbedder embedder,
+        IVoiceprintStore? voiceprints, CancellationToken ct)
+    {
+        var self = config.SelfSpeakerName;
+        if (string.IsNullOrWhiteSpace(self) || voiceprints == null || !File.Exists(meWav))
+        {
+            return (me, "Me", 0);
+        }
+
+        var samples = SpeakerAudio.ReadWav16kMono(meWav);
+        var kept = new List<TranscriptSegment>();
+        var dropped = 0;
+        foreach (var segment in me.Segments)
+        {
+            var embedding = embedder.Embed(SpeakerAudio.Slice(samples, segment.Start, segment.End));
+            double? distance = embedding.Length == 0
+                ? null
+                : await voiceprints.DistanceToAsync(self, embedding, ct).ConfigureAwait(false);
+
+            if (SpeakerIdentity.DecideMe(distance, config.SelfMatchMaxDistance, self).IsBleed)
+            {
+                dropped++;
+            }
+            else
+            {
+                kept.Add(segment);
+            }
+        }
+        return (new TrackTranscript(me.Track, me.Duration, kept), self, dropped);
     }
 
     /// <summary>Suggest names for far-side speakers from their self-introductions: regex over
