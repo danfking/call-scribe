@@ -94,6 +94,17 @@ public sealed class LiveCaptionEngine : IDisposable
     public void PrintAdvice(DateTime at, string colour, string glyph, string text) =>
         _display.PrintAdvice(at, colour, glyph, text);
 
+    /// <summary>Callback for the dashboard's /assign-name command (rename + persist a speaker).</summary>
+    public Func<string, string, CancellationToken, Task<bool>>? OnAssignName
+    {
+        get => _display.OnAssignName;
+        set => _display.OnAssignName = value;
+    }
+
+    /// <summary>Wait until the user ends the session from the dashboard (/stop or Esc), or a
+    /// line on stdin when output is redirected.</summary>
+    public Task WaitForStopAsync(CancellationToken ct) => _display.WaitForStopAsync(ct);
+
     public async Task CompleteAsync()
     {
         await Task.WhenAll(_workers).ConfigureAwait(false);

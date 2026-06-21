@@ -135,6 +135,31 @@ public sealed class VoiceprintStore : IVoiceprintStore
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> RenameAsync(string oldName, string newName, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        // Drop any existing target first so the rename can't collide on the primary key.
+        await using (var del = new NpgsqlCommand("DELETE FROM voiceprints WHERE person_name = $1", conn, tx))
+        {
+            del.Parameters.Add(new NpgsqlParameter { Value = newName });
+            await del.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        int affected;
+        await using (var upd = new NpgsqlCommand(
+            "UPDATE voiceprints SET person_name = $1, updated_at = now() WHERE person_name = $2", conn, tx))
+        {
+            upd.Parameters.Add(new NpgsqlParameter { Value = newName });
+            upd.Parameters.Add(new NpgsqlParameter { Value = oldName });
+            affected = await upd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return affected > 0;
+    }
+
     public async Task<IReadOnlyList<string>> ListPeopleAsync(CancellationToken ct)
     {
         await using var cmd = _dataSource.CreateCommand(

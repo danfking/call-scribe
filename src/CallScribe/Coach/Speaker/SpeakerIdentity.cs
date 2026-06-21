@@ -49,6 +49,29 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         return await _resolver.ResolveAsync(embedding, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Apply a live name assignment: rename the session speaker so future captions use
+    /// the name, and (if the voiceprint store is available) enroll its voiceprint so they are
+    /// recognised next meeting. Returns false when no current speaker carries
+    /// <paramref name="currentLabel"/> (e.g. a stale or mistyped label).</summary>
+    public async Task<bool> AssignNameAsync(string currentLabel, string newName, CancellationToken ct)
+    {
+        var centroid = _resolver.Rename(currentLabel, newName);
+        if (centroid == null) return false;
+
+        if (_voiceprints != null)
+        {
+            try
+            {
+                // If the current label was an enrolled person, move their stored voiceprint to
+                // the new name; otherwise enroll the new name from the live session centroid.
+                var moved = await _voiceprints.RenameAsync(currentLabel, newName, ct).ConfigureAwait(false);
+                if (!moved) await _voiceprints.EnrollAsync(newName, centroid, ct).ConfigureAwait(false);
+            }
+            catch { /* the live rename still applies even if persistence fails */ }
+        }
+        return true;
+    }
+
     /// <summary>Decide whether a mic ("Me") caption is the user's own voice. Returns a
     /// no-opinion result (keep as "Me") when self isn't enrolled or the clip is too short to
     /// embed; otherwise keeps it (labelled with the user's name) when it matches the self
