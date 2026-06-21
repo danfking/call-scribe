@@ -120,6 +120,9 @@ public static class ListenCommand
                 // (no-op until they enroll with `coach enroll-me`).
                 captions.IdentifyMeSpeaker = (samples, token) => resolver.VerifyMeAsync(samples, token);
             }
+            // Live /assign-name from the dashboard: rename the speaker + persist the voiceprint.
+            captions.OnAssignName = (label, name, token) =>
+                speakerId is null ? Task.FromResult(false) : speakerId.AssignNameAsync(label, name, token);
 
             // The dashboard shows the live state; it starts when the first track attaches.
             captions.ConfigureDisplay(liveModel);
@@ -134,7 +137,8 @@ public static class ListenCommand
             }
             else
             {
-                await Task.Run(() => Console.ReadLine(), ct).ConfigureAwait(false);
+                // /stop or Esc on the dashboard (or Enter when output is redirected).
+                await captions.WaitForStopAsync(ct).ConfigureAwait(false);
             }
 
             var duration = await engine.StopAsync().ConfigureAwait(false);

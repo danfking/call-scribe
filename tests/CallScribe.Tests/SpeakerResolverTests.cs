@@ -84,6 +84,25 @@ public class SpeakerResolverTests
 
         Assert.Equal(LiveCaptionEngine.OthersLabel, resolver.AssignSession([]));
     }
+
+    [Fact]
+    public void Rename_RelabelsSessionSpeaker_SoFutureCaptionsUseTheNewName()
+    {
+        var resolver = new SpeakerResolver(store: null);
+        var label = resolver.AssignSession([1f, 0f, 0f]); // "Speaker 1"
+
+        var centroid = resolver.Rename(label, "Sammy");
+
+        Assert.NotNull(centroid);
+        Assert.Equal("Sammy", resolver.AssignSession([0.95f, 0.05f, 0f])); // same voice -> new name
+    }
+
+    [Fact]
+    public void Rename_ReturnsNull_ForUnknownLabel()
+    {
+        var resolver = new SpeakerResolver(store: null);
+        Assert.Null(resolver.Rename("Speaker 9", "Nobody"));
+    }
 }
 
 public class SelfVerificationTests

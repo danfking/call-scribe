@@ -1,3 +1,4 @@
+using System.Text;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 
@@ -23,6 +24,18 @@ public sealed class LiveStatusDisplay : IDisposable
     private bool _showAdvice;
     private volatile bool _running;
     private Task? _liveTask;
+
+    // Slash-command input line (interactive mode only; all touched on the live render thread
+    // except _hint, which command side-effects update under _lock).
+    private readonly StringBuilder _input = new();
+    private string _hint = "";
+    private volatile bool _dirty = true;
+    private readonly TaskCompletionSource _stop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Invoked when the user runs <c>/assign-name "label" "name"</c>: rename the
+    /// speaker and persist the voiceprint. Returns false when no current speaker carries that
+    /// label. Set by ListenCommand; null means name assignment is unavailable (speaker-id off).</summary>
+    public Func<string, string, CancellationToken, Task<bool>>? OnAssignName { get; set; }
 
     // Keep memory bounded; only the tail that fits the window is ever rendered.
     private const int MaxCaptions = 500;
@@ -56,6 +69,7 @@ public sealed class LiveStatusDisplay : IDisposable
     public void SetState(string label, TrackState state)
     {
         lock (_lock) _states[label] = state;
+        _dirty = true;
     }
 
     /// <summary>Turn on the coach advice column (rendered to the right of the
@@ -82,6 +96,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 _advice.RemoveRange(0, _advice.Count - MaxCaptions);
             }
         }
+        _dirty = true;
     }
 
     public void PrintCaption(DateTime at, string colour, string label, string caption)
@@ -100,6 +115,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 _captions.RemoveRange(0, _captions.Count - MaxCaptions);
             }
         }
+        _dirty = true;
     }
 
     /// <summary>Stop the live loop so the shell prompt (and any later output) lands cleanly.</summary>
@@ -131,14 +147,166 @@ public sealed class LiveStatusDisplay : IDisposable
             .Overflow(VerticalOverflow.Crop)
             .Start(ctx =>
             {
+                // This thread is the sole owner of the console: it both reads keys and repaints,
+                // which keeps us within Spectre's "Live is single-threaded" rule. Poll fast for
+                // responsive typing, but only repaint when something changed (or the clock ticks)
+                // to avoid flicker.
+                var lastSecond = -1;
                 while (_running)
                 {
-                    ctx.UpdateTarget(BuildDashboard());
-                    Thread.Sleep(250);
+                    DrainKeys();
+                    var second = (int)(DateTime.Now - _start).TotalSeconds;
+                    if (_dirty || second != lastSecond)
+                    {
+                        _dirty = false;
+                        lastSecond = second;
+                        ctx.UpdateTarget(BuildDashboard());
+                    }
+                    Thread.Sleep(33);
                 }
                 // One final frame so the last captions stay on screen after stop.
                 ctx.UpdateTarget(BuildDashboard());
             });
+    }
+
+    private void DrainKeys()
+    {
+        try
+        {
+            while (Console.KeyAvailable) HandleKey(Console.ReadKey(intercept: true));
+        }
+        catch { /* KeyAvailable can throw on some hosts; the loop is interactive-only anyway */ }
+    }
+
+    private void HandleKey(ConsoleKeyInfo key)
+    {
+        switch (key.Key)
+        {
+            case ConsoleKey.Enter:
+                Submit();
+                break;
+            case ConsoleKey.Escape:
+                RequestStop();
+                break;
+            case ConsoleKey.Backspace:
+                if (_input.Length > 0) _input.Remove(_input.Length - 1, 1);
+                break;
+            case ConsoleKey.Tab:
+                var completed = SlashCommand.ApplyTab(_input.ToString(), CurrentLabels());
+                _input.Clear();
+                _input.Append(completed);
+                break;
+            default:
+                if (!char.IsControl(key.KeyChar)) _input.Append(key.KeyChar);
+                break;
+        }
+        _dirty = true;
+    }
+
+    private void Submit()
+    {
+        var line = _input.ToString().Trim();
+        _input.Clear();
+        if (line.Length == 0) return;
+
+        var (cmd, args) = SlashCommand.ParseCommandLine(line);
+        switch (cmd.ToLowerInvariant())
+        {
+            case "/stop":
+                RequestStop();
+                break;
+            case "/help":
+                SetHint(SlashCommand.HelpText);
+                break;
+            case "/speakers":
+                var labels = CurrentLabels();
+                SetHint(labels.Count > 0 ? "Speakers: " + string.Join(", ", labels) : "No far-side speakers yet.");
+                break;
+            case "/assign-name":
+            case "/rename":
+                HandleAssign(args);
+                break;
+            default:
+                SetHint($"Unknown command '{cmd}'. Try /help.");
+                break;
+        }
+    }
+
+    private void HandleAssign(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            SetHint("Usage: /assign-name \"<current label>\" \"<name>\"");
+            return;
+        }
+
+        var label = args[0];
+        var name = args[1];
+        var callback = OnAssignName;
+        if (callback == null)
+        {
+            SetHint("Speaker identification is off — can't assign names this session.");
+            return;
+        }
+
+        SetHint($"Assigning {name}…");
+        // Run off the render thread so the enroll DB call doesn't freeze the dashboard.
+        _ = Task.Run(async () =>
+        {
+            bool ok;
+            try { ok = await callback(label, name, CancellationToken.None).ConfigureAwait(false); }
+            catch { ok = false; }
+
+            if (ok)
+            {
+                RelabelCaptions(label, name);
+                SetHint($"Renamed {label} → {name}.");
+            }
+            else
+            {
+                SetHint($"No current speaker labelled \"{label}\".");
+            }
+        });
+    }
+
+    /// <summary>Wait for the user to end the session: /stop or Esc in interactive mode, else a
+    /// line on stdin (the redirected fallback). Replaces ListenCommand's own Console.ReadLine.</summary>
+    public Task WaitForStopAsync(CancellationToken ct) =>
+        _interactive ? _stop.Task.WaitAsync(ct) : Task.Run(() => { Console.ReadLine(); }, ct);
+
+    private void RequestStop() => _stop.TrySetResult();
+
+    private void SetHint(string text)
+    {
+        lock (_lock) _hint = text;
+        _dirty = true;
+    }
+
+    /// <summary>Distinct far-side speaker labels currently in the transcript (for autocomplete
+    /// and /speakers); excludes the user's own "Me" track.</summary>
+    private List<string> CurrentLabels()
+    {
+        lock (_lock)
+        {
+            return [.. _captions.Select(c => c.Label)
+                .Where(l => l != LiveCaptionEngine.MeLabel)
+                .Distinct()];
+        }
+    }
+
+    private void RelabelCaptions(string oldLabel, string newLabel)
+    {
+        lock (_lock)
+        {
+            for (var i = 0; i < _captions.Count; i++)
+            {
+                if (_captions[i].Label == oldLabel)
+                {
+                    _captions[i] = _captions[i] with { Label = newLabel };
+                }
+            }
+        }
+        _dirty = true;
     }
 
     private IRenderable BuildDashboard()
@@ -160,8 +328,19 @@ public sealed class LiveStatusDisplay : IDisposable
                 .BorderColor(Color.Grey)
                 .Expand();
 
-            var footer = new Markup(
-                $"[grey]Enter[/] stop & transcribe     [grey]model[/] {_model.EscapeMarkup()}");
+            // Input line + a hint line: live autocomplete while typing a command, else the last
+            // command result, else the default reminder. (Computed under the lock we already hold.)
+            var labelList = _captions.Select(c => c.Label)
+                .Where(l => l != LiveCaptionEngine.MeLabel).Distinct().ToList();
+            var live = SlashCommand.Complete(_input.ToString(), labelList);
+            var hintText = _input.Length > 0 && live.Count > 0
+                ? string.Join("   ", live)
+                : _hint.Length > 0
+                    ? _hint
+                    : $"/help for commands · /stop or Esc to finish · model {_model}";
+            var footer = new Rows(
+                new Markup($"[grey]>[/] {_input.ToString().EscapeMarkup()}[grey]▌[/]"),
+                new Markup($"[grey]{hintText.EscapeMarkup()}[/]"));
 
             IRenderable body = transcript;
             if (_showAdvice)

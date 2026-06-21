@@ -17,7 +17,7 @@ public sealed class SpeakerResolver
 {
     private sealed class SessionSpeaker(string label, float[] centroid)
     {
-        public string Label { get; } = label;
+        public string Label { get; set; } = label;
         public float[] Centroid { get; set; } = centroid;
         public int Count { get; set; } = 1;
     }
@@ -92,6 +92,20 @@ public sealed class SpeakerResolver
             var label = $"Speaker {_nextSpeaker++}";
             _session.Add(new SessionSpeaker(label, embedding));
             return label;
+        }
+    }
+
+    /// <summary>Rename a session speaker (e.g. from a live /assign-name) so future captions in
+    /// that voice use <paramref name="newLabel"/>, and return its averaged voiceprint for
+    /// enrollment. Null when no current session speaker carries <paramref name="oldLabel"/>.</summary>
+    public float[]? Rename(string oldLabel, string newLabel)
+    {
+        lock (_lock)
+        {
+            var speaker = _session.FirstOrDefault(s => s.Label == oldLabel);
+            if (speaker == null) return null;
+            speaker.Label = newLabel;
+            return speaker.Centroid;
         }
     }
 
