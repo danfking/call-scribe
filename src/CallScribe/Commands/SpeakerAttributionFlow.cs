@@ -52,6 +52,11 @@ public static class SpeakerAttributionFlow
 
             if (interactive && voiceprints != null)
             {
+                // The full-quality transcription above can take minutes; any Enter presses
+                // during it sit buffered in the console and would instantly auto-skip the
+                // first naming prompt. Drain them so the prompt actually waits for input.
+                DrainInput();
+
                 // Diarization can over-split one voice into several clusters that the resolver
                 // merged under the same "Speaker N" name; prompt once per distinct name and
                 // apply it to every cluster sharing it (so we don't ask repeatedly, and the
@@ -87,5 +92,17 @@ public static class SpeakerAttributionFlow
             embedder.Dispose();
             if (voiceprints != null) await voiceprints.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Discard any buffered console keystrokes so a stray Enter (e.g. pressed during
+    /// the slow transcription) doesn't auto-submit the next prompt. No-op if input is
+    /// redirected (piped/non-interactive).</summary>
+    private static void DrainInput()
+    {
+        try
+        {
+            while (!Console.IsInputRedirected && Console.KeyAvailable) Console.ReadKey(intercept: true);
+        }
+        catch { /* console may not support KeyAvailable in some hosts */ }
     }
 }
