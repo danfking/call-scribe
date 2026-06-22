@@ -56,7 +56,10 @@ public static class SpeakerAttributionFlow
             var others = TrackTranscript.Load(othersJson);
             var suggestions = await SuggestNamesAsync(others, result, config, ct).ConfigureAwait(false);
 
-            if (interactive && voiceprints != null)
+            // Naming needs a real console to read keys. When stdin is redirected (piped, headless,
+            // a cron/CI run), skip the prompts and leave clusters as their auto-resolved or
+            // "Speaker N" names, rather than letting AnsiConsole.Prompt throw "non-interactive mode".
+            if (interactive && voiceprints != null && !Console.IsInputRedirected)
             {
                 // The full-quality transcription above can take minutes; any Enter presses
                 // during it sit buffered in the console and would instantly auto-skip the
