@@ -79,6 +79,20 @@ public class LlmAdvisorTests
         Assert.Null(advice);
     }
 
+    [Theory]
+    [InlineData("72")]            // a bare number echoed from the transcript
+    [InlineData("inverter")]      // a single word
+    [InlineData("200")]
+    public async Task DegenerateFragment_IsSuppressed(string fragment)
+    {
+        var chat = new CannedChat($$"""{"advise": true, "kind": "warning", "advice": "{{fragment}}"}""");
+        var advisor = new LlmAdvisor(chat, "qwen3:4b");
+
+        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
+
+        Assert.Null(advice);
+    }
+
     /// <summary>Returns the given memories for any recall and records the query.</summary>
     private sealed class FakeMemory(params RecalledMemory[] toReturn) : IMemoryStore
     {

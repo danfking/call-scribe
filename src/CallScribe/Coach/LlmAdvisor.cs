@@ -33,6 +33,10 @@ public sealed class LlmAdvisor : IAdvisor
         stay silent (advise=false) or suggest they check their notes. Never name a
         specific from your own background knowledge.
 
+        Your advice must be a complete, self-contained statement that stands on its own — never a
+        bare number, a single word, or a fragment copied from the transcript. A reader who cannot
+        see the transcript must still understand it.
+
         Respond with ONLY a JSON object:
         {"advise": true|false, "kind": "tip"|"answer"|"warning", "advice": "<=25 words"}
         If nothing is worth saying, return {"advise": false, "kind": "tip", "advice": ""}.
@@ -78,13 +82,26 @@ public sealed class LlmAdvisor : IAdvisor
             return null;
         }
 
+        // Guard against degenerate output: the model sometimes echoes a transcript fragment like
+        // "72", which is meaningless on its own. Require a few words with real letters.
+        var advice = decision.Advice.Trim();
+        if (!IsSelfContained(advice)) return null;
+
         var kind = decision.Kind?.ToLowerInvariant() switch
         {
             "answer" => AdviceKind.Answer,
             "warning" => AdviceKind.Warning,
             _ => AdviceKind.Tip,
         };
-        return new AdviceEvent(DateTime.Now, kind, decision.Advice.Trim(), _model);
+        return new AdviceEvent(DateTime.Now, kind, advice, _model);
+    }
+
+    /// <summary>Advice is worth showing only if it reads as a statement on its own: at least a
+    /// couple of words and some real letters. Drops degenerate model output like a bare "72".</summary>
+    private static bool IsSelfContained(string advice)
+    {
+        var words = advice.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length >= 2 && advice.Any(char.IsLetter);
     }
 
     /// <summary>Semantic recall over past-meeting memories, keyed on the latest line (a
