@@ -4,6 +4,23 @@ using CallScribe.Transcription;
 
 namespace CallScribe.Coach;
 
+/// <summary>What the coach is doing right now, for the live status indicator. The loop is
+/// reactive per-utterance, so these are the states a user can perceive: waiting for speech,
+/// working on the latest utterance, or done with it having chosen to stay silent.</summary>
+public enum CoachActivity
+{
+    /// <summary>Idle between utterances, or just finished by emitting advice (the advice
+    /// line is the signal).</summary>
+    Listening,
+
+    /// <summary>Processing a caption: memory recall plus the fast-model call.</summary>
+    Thinking,
+
+    /// <summary>Considered the latest utterance and produced nothing (model declined, or the
+    /// advice repeated something recent and was suppressed).</summary>
+    Quiet,
+}
+
 /// <summary>Watches the live caption stream and runs an Observe → Reflect → Plan → Act
 /// loop, emitting advice asynchronously so transcription is never blocked.
 ///
@@ -30,6 +47,11 @@ public sealed class CoachEngine : IDisposable
     /// task, never on the caption thread.</summary>
     public event Action<AdviceEvent>? AdviceEmitted;
 
+    /// <summary>Raised when the coach's activity state changes (for the live status indicator):
+    /// Thinking while it works the latest utterance, then Listening (advised) or Quiet (nothing
+    /// to add). Fires on the loop task, never on the caption thread.</summary>
+    public event Action<CoachActivity>? ActivityChanged;
+
     public CoachEngine(IAdvisor advisor, IMemoryStore? memory = null, string? meetingId = null)
     {
         _advisor = advisor;
@@ -49,6 +71,7 @@ public sealed class CoachEngine : IDisposable
         // stays shallow; if a future model proves too slow, add debouncing here.
         await foreach (var caption in _inbox.Reader.ReadAllAsync().ConfigureAwait(false))
         {
+            ActivityChanged?.Invoke(CoachActivity.Thinking);
             _context.Add(caption);
             if (_context.Count > ContextWindow)
             {
@@ -74,6 +97,11 @@ public sealed class CoachEngine : IDisposable
                 if (advice is { } a && _adviceFilter.ShouldEmit(a.Text, DateTime.Now))
                 {
                     AdviceEmitted?.Invoke(a);
+                    ActivityChanged?.Invoke(CoachActivity.Listening); // advised; the line is the signal
+                }
+                else
+                {
+                    ActivityChanged?.Invoke(CoachActivity.Quiet); // declined or suppressed duplicate
                 }
             }
             catch (OperationCanceledException)
@@ -84,6 +112,7 @@ public sealed class CoachEngine : IDisposable
             {
                 AdviceEmitted?.Invoke(new AdviceEvent(
                     DateTime.Now, AdviceKind.Warning, $"coach error: {ex.Message}", "coach"));
+                ActivityChanged?.Invoke(CoachActivity.Listening);
             }
         }
     }

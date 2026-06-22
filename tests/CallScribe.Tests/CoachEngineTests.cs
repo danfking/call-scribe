@@ -61,6 +61,40 @@ public class CoachEngineTests
         Assert.Single(emitted);
     }
 
+    /// <summary>Never advises, to exercise the "considered, nothing to add" path.</summary>
+    private sealed class SilentAdvisor : IAdvisor
+    {
+        public Task<AdviceEvent?> ConsiderAsync(
+            IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct) =>
+            Task.FromResult<AdviceEvent?>(null);
+    }
+
+    [Fact]
+    public async Task Activity_GoesThinkingThenListening_WhenAdviceIsEmitted()
+    {
+        var activity = new List<CoachActivity>();
+        using var coach = new CoachEngine(new RecordingAdvisor());
+        coach.ActivityChanged += activity.Add;
+
+        coach.Observe(new CaptionEvent(T0, LiveCaptionEngine.OthersLabel, "first"));
+        await coach.CompleteAsync();
+
+        Assert.Equal([CoachActivity.Thinking, CoachActivity.Listening], activity);
+    }
+
+    [Fact]
+    public async Task Activity_GoesThinkingThenQuiet_WhenNoAdvice()
+    {
+        var activity = new List<CoachActivity>();
+        using var coach = new CoachEngine(new SilentAdvisor());
+        coach.ActivityChanged += activity.Add;
+
+        coach.Observe(new CaptionEvent(T0, LiveCaptionEngine.OthersLabel, "small talk"));
+        await coach.CompleteAsync();
+
+        Assert.Equal([CoachActivity.Thinking, CoachActivity.Quiet], activity);
+    }
+
     [Fact]
     public async Task StubAdvisor_AdvisesOnOthersQuestion_Only()
     {

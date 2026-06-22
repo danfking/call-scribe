@@ -22,6 +22,7 @@ public sealed class LiveStatusDisplay : IDisposable
     private string _model = "";
     private bool _started;
     private bool _showAdvice;
+    private (string Text, string Colour)? _coachActivity;
     private volatile bool _running;
     private Task? _liveTask;
 
@@ -39,6 +40,11 @@ public sealed class LiveStatusDisplay : IDisposable
 
     // Keep memory bounded; only the tail that fits the window is ever rendered.
     private const int MaxCaptions = 500;
+
+    // When the coach panel is shown it stacks below the transcript: it shows a small fixed block
+    // of recent advice, and the transcript reserves that much vertical space for it.
+    private const int CoachAdviceRows = 6;
+    private const int CoachPanelRows = CoachAdviceRows + 4; // advice + activity line + panel chrome
 
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
@@ -69,6 +75,15 @@ public sealed class LiveStatusDisplay : IDisposable
     public void SetState(string label, TrackState state)
     {
         lock (_lock) _states[label] = state;
+        _dirty = true;
+    }
+
+    /// <summary>Set the coach activity line shown at the top of the coach panel (e.g. thinking,
+    /// listening, considered-nothing-to-add). Presentation hints are passed in as primitives so
+    /// this class stays independent of the coach namespace, like <see cref="PrintAdvice"/>.</summary>
+    public void SetCoachActivity(string text, string colour)
+    {
+        lock (_lock) _coachActivity = (text, colour);
         _dirty = true;
     }
 
@@ -345,12 +360,15 @@ public sealed class LiveStatusDisplay : IDisposable
             IRenderable body = transcript;
             if (_showAdvice)
             {
-                var advice = new Panel(BuildAdvice())
+                // Activity line, a blank separator, then the advice log — spacing via Rows only.
+                var advice = new Panel(new Rows(BuildCoachActivity(), new Markup(""), BuildAdvice()))
                     .Header("[magenta] coach [/]")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
                     .Expand();
-                body = new Columns(transcript, advice) { Expand = true };
+                // Stack the coach below the transcript (full width), so the transcript keeps the
+                // full line width for long captions instead of being squeezed into half.
+                body = new Rows(transcript, advice);
             }
 
             return new Rows(header, cards, body, footer);
@@ -375,8 +393,10 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private IRenderable BuildTranscript()
     {
-        // Show the tail that fits, leaving room for the header, cards, borders, footer.
-        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        // Show the tail that fits, leaving room for the header, cards, borders, footer, and (when
+        // shown) the coach panel stacked below.
+        var reserved = _showAdvice ? CoachPanelRows : 0;
+        var visible = Math.Max(3, SafeWindowHeight() - 12 - reserved);
         var slice = _captions.Count > visible
             ? _captions.GetRange(_captions.Count - visible, visible)
             : _captions;
@@ -391,9 +411,16 @@ public sealed class LiveStatusDisplay : IDisposable
         return new Markup(string.Join("\n", lines));
     }
 
+    /// <summary>The coach status line above the advice log: shows what the coach is doing now
+    /// (thinking / listening / considered-nothing-to-add). The text/colour are set by the wiring,
+    /// which seeds the resting "Listening" state up front; blank until then.</summary>
+    private IRenderable BuildCoachActivity() =>
+        _coachActivity is { } a ? new Markup($"[{a.Colour}]{a.Text.EscapeMarkup()}[/]") : new Markup("");
+
     private IRenderable BuildAdvice()
     {
-        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        // A small fixed block of the most recent advice; the panel sits below the transcript.
+        var visible = CoachAdviceRows;
         var slice = _advice.Count > visible
             ? _advice.GetRange(_advice.Count - visible, visible)
             : _advice;
