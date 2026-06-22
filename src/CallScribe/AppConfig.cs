@@ -150,6 +150,15 @@ public sealed class AppConfig
     [JsonPropertyName("selfMatchMaxDistance")]
     public double SelfMatchMaxDistance { get; set; } = 0.6;
 
+    /// <summary>Relative bleed test for the mic track: in addition to the absolute
+    /// <see cref="SelfMatchMaxDistance"/> gate, a caption is dropped as bleed when it is closer to
+    /// a far-side speaker's voiceprint than to your own by at least this margin. This catches
+    /// bleed that sits within the loose self threshold but clearly belongs to someone on the far
+    /// side. Larger = more conservative (keeps more as you); 0 drops whenever a far-side voice is
+    /// strictly closer. Only applies once at least one far-side speaker has been heard.</summary>
+    [JsonPropertyName("selfRelativeMargin")]
+    public double SelfRelativeMargin { get; set; } = 0.05;
+
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
     public static string ConfigPath => Path.Combine(

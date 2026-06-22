@@ -182,6 +182,51 @@ public class SelfVerificationTests
         Assert.False(result.IsBleed);
         Assert.Equal("Dan", result.Name);
     }
+
+    [Fact]
+    public void RelativeTest_DropsWhenCloserToFarSideThanSelf()
+    {
+        // Within the absolute self threshold (0.5 <= 0.6) but a far-side voice is clearly closer
+        // (0.3 < 0.5 - 0.05): the relative test flags it as bleed.
+        var result = SpeakerIdentity.DecideMe(0.5, 0.6, "Dan", nearestFarSide: 0.3, relativeMargin: 0.05);
+        Assert.True(result.IsBleed);
+        Assert.Null(result.Name);
+    }
+
+    [Fact]
+    public void RelativeTest_KeepsWhenSelfIsClosest()
+    {
+        // Self (0.3) is closer than the nearest far-side voice (0.5): keep, labelled.
+        var result = SpeakerIdentity.DecideMe(0.3, 0.6, "Dan", nearestFarSide: 0.5, relativeMargin: 0.05);
+        Assert.False(result.IsBleed);
+        Assert.Equal("Dan", result.Name);
+    }
+
+    [Fact]
+    public void RelativeTest_KeepsWhenFarSideOnlyMarginallyCloser()
+    {
+        // Far side closer (0.47 < 0.5) but inside the margin (0.5 - 0.05 = 0.45), so not enough to
+        // override: keep as the user. Guards against dropping the user on noisy near-ties.
+        var result = SpeakerIdentity.DecideMe(0.5, 0.6, "Dan", nearestFarSide: 0.47, relativeMargin: 0.05);
+        Assert.False(result.IsBleed);
+        Assert.Equal("Dan", result.Name);
+    }
+
+    [Fact]
+    public void RelativeTest_NoFarSideSpeakerYet_FallsBackToAbsolute()
+    {
+        // No far-side voice heard (null): behaves exactly like the absolute-only policy.
+        Assert.False(SpeakerIdentity.DecideMe(0.5, 0.6, "Dan", nearestFarSide: null, relativeMargin: 0.05).IsBleed);
+        Assert.True(SpeakerIdentity.DecideMe(0.7, 0.6, "Dan", nearestFarSide: null, relativeMargin: 0.05).IsBleed);
+    }
+
+    [Fact]
+    public void AbsoluteGate_StillDropsClearlyNotSelf_EvenIfFarSideIsFartherStill()
+    {
+        // Beyond the self threshold (0.7 > 0.6): bleed, regardless of where the far side sits.
+        var result = SpeakerIdentity.DecideMe(0.7, 0.6, "Dan", nearestFarSide: 0.9, relativeMargin: 0.05);
+        Assert.True(result.IsBleed);
+    }
 }
 
 public class VectorMathTests

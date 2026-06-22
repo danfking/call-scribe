@@ -89,10 +89,16 @@ public static class SpeakerAttributionFlow
 
             // The batch pass transcribes the raw mic, which on speakers contains far-side
             // bleed; drop the Me segments that aren't the enrolled self voice (same check the
-            // live path uses) so the saved transcript matches what was shown on screen.
+            // live path uses) so the saved transcript matches what was shown on screen. The
+            // far-side cluster means (this meeting's other voices) feed the relative bleed test.
+            var farSideMeans = result.Clusters
+                .Where(c => !string.Equals(c.Name, config.SelfSpeakerName, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.MeanEmbedding)
+                .Where(m => m.Length > 0)
+                .ToList();
             var me = TrackTranscript.Load(meJson);
             var (meFiltered, meLabel, dropped) =
-                await FilterMeBleedAsync(me, meWav, config, embedder, voiceprints, ct).ConfigureAwait(false);
+                await FilterMeBleedAsync(me, meWav, config, embedder, voiceprints, farSideMeans, ct).ConfigureAwait(false);
             if (dropped > 0)
             {
                 AnsiConsole.MarkupLine($"[grey]Dropped {dropped} far-side bleed segment(s) from the Me track.[/]");
@@ -120,7 +126,7 @@ public static class SpeakerAttributionFlow
     /// the label to show, and how many segments were dropped.</summary>
     private static async Task<(TrackTranscript Track, string Label, int Dropped)> FilterMeBleedAsync(
         TrackTranscript me, string meWav, AppConfig config, ISpeakerEmbedder embedder,
-        IVoiceprintStore? voiceprints, CancellationToken ct)
+        IVoiceprintStore? voiceprints, IReadOnlyList<float[]> farSideMeans, CancellationToken ct)
     {
         var self = config.SelfSpeakerName;
         if (string.IsNullOrWhiteSpace(self) || voiceprints == null || !File.Exists(meWav))
@@ -137,8 +143,12 @@ public static class SpeakerAttributionFlow
             double? distance = embedding.Length == 0
                 ? null
                 : await voiceprints.DistanceToAsync(self, embedding, ct).ConfigureAwait(false);
+            // Nearest far-side voice for the relative test (this meeting's other speakers).
+            double? nearestFarSide = embedding.Length == 0 || farSideMeans.Count == 0
+                ? null
+                : farSideMeans.Min(m => VectorMath.CosineDistance(m, embedding));
 
-            if (SpeakerIdentity.DecideMe(distance, config.SelfMatchMaxDistance, self).IsBleed)
+            if (SpeakerIdentity.DecideMe(distance, config.SelfMatchMaxDistance, self, nearestFarSide, config.SelfRelativeMargin).IsBleed)
             {
                 dropped++;
             }

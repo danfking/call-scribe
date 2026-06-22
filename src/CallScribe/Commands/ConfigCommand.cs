@@ -16,8 +16,9 @@ public static class ConfigCommand
                           + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
                           + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
                           + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
-                          + "selfSpeakerName | selfMatchMaxDistance | diarizationClusterThreshold | "
-                          + "diarizationMinClusterSeconds | sessionMergeDistance | liveMinSpeakerSeconds",
+                          + "selfSpeakerName | selfMatchMaxDistance | selfRelativeMargin | "
+                          + "diarizationClusterThreshold | diarizationMinClusterSeconds | "
+                          + "sessionMergeDistance | liveMinSpeakerSeconds",
         };
         var valueArgument = new Argument<string>("value")
         {
@@ -64,6 +65,7 @@ public static class ConfigCommand
         table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
         table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
         table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
+        table.AddRow("selfRelativeMargin", config.SelfRelativeMargin.ToString("0.##"), "0.05");
         table.AddRow("diarizationClusterThreshold", config.DiarizationClusterThreshold.ToString("0.##"), "0.75");
         table.AddRow("diarizationMinClusterSeconds", config.DiarizationMinClusterSeconds.ToString("0.##"), "8");
         table.AddRow("sessionMergeDistance", config.SessionMergeDistance.ToString("0.##"), "0.55");
@@ -149,6 +151,9 @@ public static class ConfigCommand
                 break;
             case "selfmatchmaxdistance":
                 config.SelfMatchMaxDistance = cleared ? 0.6 : double.Parse(value);
+                break;
+            case "selfrelativemargin":
+                config.SelfRelativeMargin = cleared ? 0.05 : double.Parse(value);
                 break;
             case "diarizationclusterthreshold":
                 config.DiarizationClusterThreshold = cleared ? 0.75f : float.Parse(value);

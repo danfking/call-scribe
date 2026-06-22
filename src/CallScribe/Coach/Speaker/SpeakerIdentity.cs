@@ -15,16 +15,18 @@ public sealed class SpeakerIdentity : IAsyncDisposable
     private readonly IVoiceprintStore? _voiceprints;
     private readonly string? _selfName;
     private readonly double _selfThreshold;
+    private readonly double _relativeMargin;
 
     private SpeakerIdentity(
         ISpeakerEmbedder embedder, SpeakerResolver resolver, IVoiceprintStore? voiceprints,
-        string? selfName, double selfThreshold)
+        string? selfName, double selfThreshold, double relativeMargin)
     {
         _embedder = embedder;
         _resolver = resolver;
         _voiceprints = voiceprints;
         _selfName = string.IsNullOrWhiteSpace(selfName) ? null : selfName;
         _selfThreshold = selfThreshold;
+        _relativeMargin = relativeMargin;
     }
 
     /// <summary>Build the live service from config, or null if unavailable.</summary>
@@ -38,7 +40,8 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         var voiceprints = await TryCreateVoiceprintsAsync(config, embedder.Dimensions, ct).ConfigureAwait(false);
         var resolver = new SpeakerResolver(
             voiceprints, config.VoiceprintMaxDistance, config.SessionMergeDistance, config.LiveMinSpeakerSeconds);
-        return new SpeakerIdentity(embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance);
+        return new SpeakerIdentity(
+            embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance, config.SelfRelativeMargin);
     }
 
     /// <summary>Resolve a far-side caption's 16 kHz mono samples to a speaker name, falling
@@ -95,18 +98,26 @@ public sealed class SpeakerIdentity : IAsyncDisposable
             return new MeSpeakerResult(false, null); // store hiccup: never drop the user's speech
         }
 
-        return DecideMe(distance, _selfThreshold, _selfName);
+        // How close this clip is to the nearest far-side voice heard so far, for the relative test.
+        var nearestFarSide = _resolver.NearestSessionDistance(embedding);
+        return DecideMe(distance, _selfThreshold, _selfName, nearestFarSide, _relativeMargin);
     }
 
-    /// <summary>Pure self-verification policy. Conservative: only suppress when we have a
-    /// real distance that exceeds the threshold; a null distance (self not enrolled, or no
-    /// embedding) means "no opinion — keep as Me".</summary>
-    public static MeSpeakerResult DecideMe(double? distanceToSelf, double threshold, string selfName)
+    /// <summary>Pure self-verification policy. Conservative: a null distance (self not enrolled,
+    /// or no embedding) means "no opinion — keep as Me". Suppress as bleed when the clip is either
+    /// clearly not you (absolute: distance-to-self exceeds <paramref name="threshold"/>) or closer
+    /// to a far-side voice than to you by at least <paramref name="relativeMargin"/> (relative). A
+    /// null <paramref name="nearestFarSide"/> (no far-side speaker heard yet) skips the relative
+    /// test, leaving the original absolute behaviour.</summary>
+    public static MeSpeakerResult DecideMe(
+        double? distanceToSelf, double threshold, string selfName,
+        double? nearestFarSide = null, double relativeMargin = 0)
     {
-        if (distanceToSelf is not double d) return new MeSpeakerResult(false, null);
-        return d <= threshold
-            ? new MeSpeakerResult(false, selfName)   // it's you → keep, labelled
-            : new MeSpeakerResult(true, null);        // not you → far-side bleed → suppress
+        if (distanceToSelf is not double self) return new MeSpeakerResult(false, null);
+        if (self > threshold) return new MeSpeakerResult(true, null);                 // absolute: not you
+        if (nearestFarSide is double far && far < self - relativeMargin)
+            return new MeSpeakerResult(true, null);                                   // relative: closer to far side
+        return new MeSpeakerResult(false, selfName);                                  // it's you → keep, labelled
     }
 
     // --- shared creation helpers (also used by enrollment and offline diarization) -----

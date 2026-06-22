@@ -132,6 +132,23 @@ public sealed class SpeakerResolver
         }
     }
 
+    /// <summary>Smallest cosine distance from <paramref name="embedding"/> to any far-side session
+    /// speaker's centroid, or null when no speakers have been heard yet. Used by the mic-track
+    /// check to tell whether a caption is closer to a far-side voice than to the user.</summary>
+    public double? NearestSessionDistance(float[] embedding)
+    {
+        lock (_lock)
+        {
+            double? best = null;
+            foreach (var speaker in _session)
+            {
+                var d = VectorMath.CosineDistance(speaker.Centroid, embedding);
+                if (best is null || d < best) best = d;
+            }
+            return best;
+        }
+    }
+
     /// <summary>Rename a session speaker (e.g. from a live /assign-name) so future captions in
     /// that voice use <paramref name="newLabel"/>, and return its averaged voiceprint for
     /// enrollment. Null when no current session speaker carries <paramref name="oldLabel"/>.</summary>
