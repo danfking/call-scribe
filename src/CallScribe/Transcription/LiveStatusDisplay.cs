@@ -46,6 +46,10 @@ public sealed class LiveStatusDisplay : IDisposable
     private const int CoachAdviceRows = 6;
     private const int CoachPanelRows = CoachAdviceRows + 4; // advice + activity line + panel chrome
 
+    // Width of a transcript line's "HH:mm:ss  label   " prefix, for estimating how many rows a
+    // (speaker-coalesced, possibly long) entry wraps to.
+    private const int TranscriptPrefixWidth = 18;
+
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
 
@@ -124,10 +128,21 @@ public sealed class LiveStatusDisplay : IDisposable
         }
         lock (_lock)
         {
-            _captions.Add(new Caption(at, colour, label, caption));
-            if (_captions.Count > MaxCaptions)
+            // The live engine flushes speech in short chunks; while the same speaker keeps talking,
+            // grow their existing line instead of printing a new one per chunk (much less noisy).
+            // The entry keeps its original timestamp (when the turn started).
+            if (_captions.Count > 0 && _captions[^1].Label == label)
             {
-                _captions.RemoveRange(0, _captions.Count - MaxCaptions);
+                var prev = _captions[^1];
+                _captions[^1] = prev with { Text = $"{prev.Text} {caption}" };
+            }
+            else
+            {
+                _captions.Add(new Caption(at, colour, label, caption));
+                if (_captions.Count > MaxCaptions)
+                {
+                    _captions.RemoveRange(0, _captions.Count - MaxCaptions);
+                }
             }
         }
         _dirty = true;
@@ -393,23 +408,38 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private IRenderable BuildTranscript()
     {
-        // Show the tail that fits, leaving room for the header, cards, borders, footer, and (when
-        // shown) the coach panel stacked below.
+        // Show the newest entries that fit, leaving room for the header, cards, borders, footer,
+        // and (when shown) the coach panel below. Entries are speaker-coalesced so they can wrap
+        // to several rows; budget by estimated rendered rows (not entry count) so one long turn
+        // can't push the footer off screen.
         var reserved = _showAdvice ? CoachPanelRows : 0;
-        var visible = Math.Max(3, SafeWindowHeight() - 12 - reserved);
-        var slice = _captions.Count > visible
-            ? _captions.GetRange(_captions.Count - visible, visible)
-            : _captions;
+        var rowBudget = Math.Max(3, SafeWindowHeight() - 12 - reserved);
+        var lineWidth = Math.Max(20, SafeWindowWidth() - 4); // minus panel border/padding
 
-        if (slice.Count == 0)
+        var chosen = new List<Caption>();
+        var rows = 0;
+        for (var i = _captions.Count - 1; i >= 0; i--)
+        {
+            var estRows = WrappedRows(TranscriptPrefixWidth + _captions[i].Text.Length, lineWidth);
+            if (chosen.Count > 0 && rows + estRows > rowBudget) break;
+            chosen.Add(_captions[i]);
+            rows += estRows;
+        }
+        chosen.Reverse();
+
+        if (chosen.Count == 0)
         {
             return new Markup("[grey](waiting for audio…)[/]");
         }
 
-        var lines = slice.Select(c =>
+        var lines = chosen.Select(c =>
             $"[grey]{c.At:HH:mm:ss}[/]  [{c.Colour}]{c.Label,-6}[/] {c.Text.EscapeMarkup()}");
         return new Markup(string.Join("\n", lines));
     }
+
+    /// <summary>Estimated number of wrapped rows for a line of <paramref name="chars"/> visible
+    /// characters at <paramref name="lineWidth"/> columns (at least one row).</summary>
+    private static int WrappedRows(int chars, int lineWidth) => Math.Max(1, (chars + lineWidth - 1) / lineWidth);
 
     /// <summary>The coach status line above the advice log: shows what the coach is doing now
     /// (thinking / listening / considered-nothing-to-add). The text/colour are set by the wiring,
@@ -439,5 +469,11 @@ public sealed class LiveStatusDisplay : IDisposable
     {
         try { return Console.WindowHeight; }
         catch { return 24; }
+    }
+
+    private static int SafeWindowWidth()
+    {
+        try { return Console.WindowWidth; }
+        catch { return 100; }
     }
 }
