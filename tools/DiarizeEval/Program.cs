@@ -45,7 +45,7 @@ if (embedder == null)
 }
 
 var samples = SpeakerAudio.ReadWav16kMono(wavPath);
-var totalSecs = samples.Length / 16000.0;
+var totalSecs = samples.Length / (double)SpeakerAudio.SampleRate;
 var minClusterSecs = config.DiarizationMinClusterSeconds;
 Console.WriteLine($"Recording: {Path.GetFileName(wavPath)}  ({totalSecs:F0}s audio, {samples.Length} samples @16k)");
 Console.WriteLine($"Sweeping clusterThreshold (higher = fewer, coarser speakers).");
@@ -60,7 +60,7 @@ foreach (var threshold in thresholds)
     var segments = diarizer.Process(samples);
     var rawCount = segments.Select(s => s.Speaker).Distinct().Count();
 
-    var merged = OfflineDiarization.MergeSmallClusters(embedder, samples, segments, minClusterSecs);
+    var (merged, _) = OfflineDiarization.MergeSmallClusters(embedder, samples, segments, minClusterSecs);
     var mergedGroups = merged
         .GroupBy(s => s.Speaker)
         .Select(g => (Speaker: g.Key, Secs: g.Sum(s => s.End - s.Start)))

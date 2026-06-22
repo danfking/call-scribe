@@ -34,10 +34,25 @@ public class OfflineDiarizationTests
             (20, [0.9f, 0.1f, 0f])); // cluster 2 (F): near A
         var segments = new List<DiarizedSegment> { new(0, 10, 0), new(10, 20, 1), new(20, 21, 2) };
 
-        var merged = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
+        var (merged, _) = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
 
         Assert.Equal(2, merged.Select(s => s.Speaker).Distinct().Count());
         Assert.Equal(0, merged.Single(s => s.Start == 20).Speaker); // F folded into A, not its own speaker
+    }
+
+    [Fact]
+    public void MergeSmallClusters_ReturnsMeansForSurvivingClusters_SoCallerNeedNotReEmbed()
+    {
+        var samples = BuildSamples(21, (0, [1f, 0f, 0f]), (10, [0f, 1f, 0f]), (20, [0.9f, 0.1f, 0f]));
+        var segments = new List<DiarizedSegment> { new(0, 10, 0), new(10, 20, 1), new(20, 21, 2) };
+
+        var (merged, means) = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
+
+        // Every surviving cluster has a precomputed mean the naming loop can reuse.
+        foreach (var speaker in merged.Select(s => s.Speaker).Distinct())
+        {
+            Assert.True(means.ContainsKey(speaker));
+        }
     }
 
     [Fact]
@@ -46,7 +61,7 @@ public class OfflineDiarizationTests
         var samples = BuildSamples(21, (0, [1f, 0f, 0f]), (10, [0f, 1f, 0f]), (20, [0.9f, 0.1f, 0f]));
         var segments = new List<DiarizedSegment> { new(0, 10, 0), new(10, 20, 1), new(20, 21, 2) };
 
-        var merged = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 0);
+        var (merged, _) = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 0);
 
         Assert.Equal(3, merged.Select(s => s.Speaker).Distinct().Count());
     }
@@ -59,7 +74,7 @@ public class OfflineDiarizationTests
         var samples = BuildSamples(21, (0, [1f, 0f, 0f]), (10, [0f, 1f, 0f]));
         var segments = new List<DiarizedSegment> { new(0, 10, 0), new(10, 20, 1), new(20, 20.0001, 2) };
 
-        var merged = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
+        var (merged, _) = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
 
         Assert.Equal(2, merged.Select(s => s.Speaker).Distinct().Count());
         Assert.DoesNotContain(merged, s => s.Speaker == 2);
@@ -71,7 +86,7 @@ public class OfflineDiarizationTests
         var samples = BuildSamples(20, (0, [1f, 0f, 0f]), (10, [0f, 1f, 0f]));
         var segments = new List<DiarizedSegment> { new(0, 10, 0), new(10, 20, 1) };
 
-        var merged = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
+        var (merged, _) = OfflineDiarization.MergeSmallClusters(new FirstThreeEmbedder(), samples, segments, minClusterSeconds: 8.0);
 
         Assert.Equal(2, merged.Select(s => s.Speaker).Distinct().Count());
     }

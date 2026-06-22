@@ -68,8 +68,10 @@ public static class OfflineDiarization
         if (segments.Count == 0) return null;
 
         // Fold short fragment clusters into their nearest substantial cluster so a brief turn is
-        // attributed to the right person rather than spawning its own "Speaker N".
-        segments = MergeSmallClusters(embedder, samples, segments, config.DiarizationMinClusterSeconds);
+        // attributed to the right person rather than spawning its own "Speaker N". The merge also
+        // hands back each surviving cluster's mean voiceprint so we don't embed the audio twice.
+        var (merged, clusterMeans) = MergeSmallClusters(embedder, samples, segments, config.DiarizationMinClusterSeconds);
+        segments = merged;
 
         var resolver = new SpeakerResolver(voiceprints, config.VoiceprintMaxDistance, config.SessionMergeDistance);
         var clusters = new List<SpeakerCluster>();
@@ -77,7 +79,9 @@ public static class OfflineDiarization
         // Name clusters in order of first appearance so "Speaker 1" is the first to talk.
         foreach (var group in segments.GroupBy(s => s.Speaker).OrderBy(g => g.Min(s => s.Start)))
         {
-            var mean = MeanEmbedding(embedder, samples, group);
+            // Reuse the mean computed during the merge; only embed here if the merge was a no-op
+            // (gate disabled) and so produced no means.
+            var mean = clusterMeans.TryGetValue(group.Key, out var m) ? m : MeanEmbedding(embedder, samples, group);
             if (mean.Length == 0) continue;
 
             string name;
@@ -111,21 +115,27 @@ public static class OfflineDiarization
     /// voiceprint is nearest. This collapses the fragment tail that diarization leaves behind
     /// (short turns embed unreliably and otherwise become their own speakers) while keeping the
     /// short turn's words, now attributed to the most similar real speaker. No-op when the gate
-    /// is disabled (≤ 0), or when there are no substantial clusters to merge into. Public for the
+    /// is disabled (≤ 0), or when there are no substantial clusters to merge into. Also returns the
+    /// per-cluster mean voiceprints it computes, keyed by cluster index, so the caller can name the
+    /// surviving clusters without embedding the same audio a second time. Public for the
     /// DiarizeEval tool and unit tests.</summary>
-    public static IReadOnlyList<DiarizedSegment> MergeSmallClusters(
+    public static (IReadOnlyList<DiarizedSegment> Segments, IReadOnlyDictionary<int, float[]> ClusterMeans) MergeSmallClusters(
         ISpeakerEmbedder embedder, float[] samples, IReadOnlyList<DiarizedSegment> segments, double minClusterSeconds)
     {
-        if (minClusterSeconds <= 0) return segments;
+        IReadOnlyDictionary<int, float[]> noMeans = new Dictionary<int, float[]>();
+        if (minClusterSeconds <= 0) return (segments, noMeans);
 
         var stats = segments
             .GroupBy(s => s.Speaker)
             .Select(c => (Index: c.Key, Secs: c.Sum(s => s.End - s.Start), Mean: MeanEmbedding(embedder, samples, c)))
             .ToList();
 
+        // Means of every embeddable cluster, handed back so the caller reuses them for naming.
+        IReadOnlyDictionary<int, float[]> means = stats.Where(c => c.Mean.Length > 0).ToDictionary(c => c.Index, c => c.Mean);
+
         // A cluster is trustworthy only if it has enough speech AND embeds to a voiceprint.
         var substantial = stats.Where(c => c.Secs >= minClusterSeconds && c.Mean.Length > 0).ToList();
-        if (substantial.Count == 0) return segments; // nothing to merge into
+        if (substantial.Count == 0) return (segments, means); // nothing to merge into
 
         var remap = new Dictionary<int, int>();
         var drop = new HashSet<int>();
@@ -146,11 +156,12 @@ public static class OfflineDiarization
             }
         }
 
-        if (remap.Count == 0 && drop.Count == 0) return segments;
+        if (remap.Count == 0 && drop.Count == 0) return (segments, means);
 
-        return [.. segments
+        IReadOnlyList<DiarizedSegment> result = [.. segments
             .Where(s => !drop.Contains(s.Speaker))
             .Select(s => remap.TryGetValue(s.Speaker, out var to) ? s with { Speaker = to } : s)];
+        return (result, means);
     }
 
     /// <summary>Average the embeddings of a cluster's turns into a single voiceprint.</summary>

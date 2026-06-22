@@ -47,7 +47,7 @@ public sealed class SpeakerIdentity : IAsyncDisposable
     {
         var embedding = _embedder.Embed(samples16kMono);
         if (embedding.Length == 0) return LiveCaptionEngine.OthersLabel;
-        var clipSeconds = samples16kMono.Length / 16000.0;
+        var clipSeconds = samples16kMono.Length / (double)SpeakerAudio.SampleRate;
         return await _resolver.ResolveAsync(embedding, clipSeconds, ct).ConfigureAwait(false);
     }
 
