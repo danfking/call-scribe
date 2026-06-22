@@ -67,7 +67,11 @@ public static class OfflineDiarization
         var segments = diarizer.Process(samples);
         if (segments.Count == 0) return null;
 
-        var resolver = new SpeakerResolver(voiceprints, config.VoiceprintMaxDistance);
+        // Fold short fragment clusters into their nearest substantial cluster so a brief turn is
+        // attributed to the right person rather than spawning its own "Speaker N".
+        segments = MergeSmallClusters(embedder, samples, segments, config.DiarizationMinClusterSeconds);
+
+        var resolver = new SpeakerResolver(voiceprints, config.VoiceprintMaxDistance, config.SessionMergeDistance);
         var clusters = new List<SpeakerCluster>();
 
         // Name clusters in order of first appearance so "Speaker 1" is the first to talk.
@@ -100,6 +104,53 @@ public static class OfflineDiarization
         }
 
         return clusters.Count == 0 ? null : new DiarizationResult(segments, clusters);
+    }
+
+    /// <summary>Reassign the segments of every cluster with less than
+    /// <paramref name="minClusterSeconds"/> of total speech to the substantial cluster whose mean
+    /// voiceprint is nearest. This collapses the fragment tail that diarization leaves behind
+    /// (short turns embed unreliably and otherwise become their own speakers) while keeping the
+    /// short turn's words, now attributed to the most similar real speaker. No-op when the gate
+    /// is disabled (≤ 0), or when there are no substantial clusters to merge into. Public for the
+    /// DiarizeEval tool and unit tests.</summary>
+    public static IReadOnlyList<DiarizedSegment> MergeSmallClusters(
+        ISpeakerEmbedder embedder, float[] samples, IReadOnlyList<DiarizedSegment> segments, double minClusterSeconds)
+    {
+        if (minClusterSeconds <= 0) return segments;
+
+        var stats = segments
+            .GroupBy(s => s.Speaker)
+            .Select(c => (Index: c.Key, Secs: c.Sum(s => s.End - s.Start), Mean: MeanEmbedding(embedder, samples, c)))
+            .ToList();
+
+        // A cluster is trustworthy only if it has enough speech AND embeds to a voiceprint.
+        var substantial = stats.Where(c => c.Secs >= minClusterSeconds && c.Mean.Length > 0).ToList();
+        if (substantial.Count == 0) return segments; // nothing to merge into
+
+        var remap = new Dictionary<int, int>();
+        var drop = new HashSet<int>();
+        foreach (var c in stats)
+        {
+            if (c.Secs >= minClusterSeconds && c.Mean.Length > 0) continue; // keep substantial clusters
+            if (c.Mean.Length > 0)
+            {
+                // Short but embeddable: fold into the substantial cluster nearest by voice.
+                remap[c.Index] = substantial.OrderBy(s => VectorMath.CosineDistance(s.Mean, c.Mean)).First().Index;
+            }
+            else
+            {
+                // Too short/quiet to characterise (a sub-second blip): drop it as noise rather
+                // than let it survive as a phantom speaker. Overlapping transcript text, if any,
+                // falls back to the generic "Others" label.
+                drop.Add(c.Index);
+            }
+        }
+
+        if (remap.Count == 0 && drop.Count == 0) return segments;
+
+        return [.. segments
+            .Where(s => !drop.Contains(s.Speaker))
+            .Select(s => remap.TryGetValue(s.Speaker, out var to) ? s with { Speaker = to } : s)];
     }
 
     /// <summary>Average the embeddings of a cluster's turns into a single voiceprint.</summary>

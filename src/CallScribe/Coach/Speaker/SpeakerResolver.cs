@@ -25,6 +25,7 @@ public sealed class SpeakerResolver
     private readonly IVoiceprintStore? _store;
     private readonly double _enrolledMaxDistance;
     private readonly double _sessionMergeDistance;
+    private readonly double _minSpeakerSeconds;
     private readonly List<SessionSpeaker> _session = [];
     private readonly object _lock = new();
     private int _nextSpeaker = 1;
@@ -36,16 +37,23 @@ public sealed class SpeakerResolver
     /// session cluster instead of starting a new "Speaker N". Looser than the enrolled
     /// threshold because clustering one meeting's voices is more forgiving than asserting
     /// a specific identity.</param>
-    public SpeakerResolver(IVoiceprintStore? store, double enrolledMaxDistance = 0.30, double sessionMergeDistance = 0.55)
+    /// <param name="minSpeakerSeconds">A clip shorter than this is too brief to embed reliably,
+    /// so it attaches to the nearest existing speaker rather than minting a new one. 0 disables
+    /// the gate (e.g. the offline pass, which feeds already-substantial cluster means).</param>
+    public SpeakerResolver(
+        IVoiceprintStore? store, double enrolledMaxDistance = 0.30,
+        double sessionMergeDistance = 0.55, double minSpeakerSeconds = 0)
     {
         _store = store;
         _enrolledMaxDistance = enrolledMaxDistance;
         _sessionMergeDistance = sessionMergeDistance;
+        _minSpeakerSeconds = minSpeakerSeconds;
     }
 
     /// <summary>Resolve an embedding to a name, consulting enrolled voiceprints first.
-    /// A store error degrades to session clustering rather than failing the caption.</summary>
-    public async Task<string> ResolveAsync(float[] embedding, CancellationToken ct)
+    /// A store error degrades to session clustering rather than failing the caption.
+    /// <paramref name="clipSeconds"/> gates minting a new session speaker from a too-short clip.</summary>
+    public async Task<string> ResolveAsync(float[] embedding, double clipSeconds, CancellationToken ct)
     {
         if (embedding.Length == 0) return UnknownSpeaker();
 
@@ -61,12 +69,14 @@ public sealed class SpeakerResolver
             catch { /* fall through to session clustering */ }
         }
 
-        return AssignSession(embedding);
+        return AssignSession(embedding, clipSeconds);
     }
 
     /// <summary>Session-local online clustering with no store lookup. Public for direct
-    /// testing and for the after-meeting pass, which clusters offline and names afterwards.</summary>
-    public string AssignSession(float[] embedding)
+    /// testing and for the after-meeting pass, which clusters offline and names afterwards.
+    /// <paramref name="clipSeconds"/> defaults to "long enough" so callers that feed substantial
+    /// audio (the offline pass, tests) always cluster normally.</summary>
+    public string AssignSession(float[] embedding, double clipSeconds = double.MaxValue)
     {
         if (embedding.Length == 0) return UnknownSpeaker();
 
@@ -90,6 +100,11 @@ public sealed class SpeakerResolver
                 best.Count++;
                 return best.Label;
             }
+
+            // Too short to trust as a distinct identity: attach to the nearest existing speaker
+            // (without polluting its centroid) rather than mint a fragment speaker. With no
+            // speakers yet, stay generic instead of seeding a cluster from an unreliable clip.
+            if (clipSeconds < _minSpeakerSeconds) return best?.Label ?? UnknownSpeaker();
 
             var label = $"Speaker {_nextSpeaker++}";
             _session.Add(new SessionSpeaker(label, embedding));
