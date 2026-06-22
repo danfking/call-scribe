@@ -8,8 +8,11 @@ namespace CallScribe.Coach;
 /// (fast model to triage, reasoning model to synthesise) behind the same interface.</summary>
 public interface IAdvisor
 {
+    /// <param name="recentAdvice">Advice already shown this meeting, so the advisor can avoid
+    /// repeating or rephrasing a point it has already made.</param>
     Task<AdviceEvent?> ConsiderAsync(
-        IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct);
+        IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+        IReadOnlyList<string> recentAdvice, CancellationToken ct);
 }
 
 /// <summary>Deterministic placeholder advisor: surfaces a prompt when the other side
@@ -18,7 +21,8 @@ public interface IAdvisor
 public sealed class StubAdvisor : IAdvisor
 {
     public Task<AdviceEvent?> ConsiderAsync(
-        IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct)
+        IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+        IReadOnlyList<string> recentAdvice, CancellationToken ct)
     {
         AdviceEvent? advice = null;
         if (latest.Label == LiveCaptionEngine.OthersLabel && latest.Caption.TrimEnd().EndsWith('?'))

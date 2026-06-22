@@ -38,7 +38,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("""{"advise": true, "kind": "answer", "advice": "Describe the dual-track capture."}""");
         var advisor = new LlmAdvisor(chat, "qwen3:4b");
 
-        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.NotNull(advice);
         Assert.Equal(AdviceKind.Answer, advice!.Value.Kind);
@@ -52,7 +52,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
         var advisor = new LlmAdvisor(chat, "qwen3:4b");
 
-        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.Null(advice);
     }
@@ -63,7 +63,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("not json at all");
         var advisor = new LlmAdvisor(chat, "qwen3:4b");
 
-        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.Null(advice);
     }
@@ -74,7 +74,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("""{"advise": true, "kind": "tip", "advice": "   "}""");
         var advisor = new LlmAdvisor(chat, "qwen3:4b");
 
-        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        var advice = await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.Null(advice);
     }
@@ -109,7 +109,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
         var advisor = new LlmAdvisor(chat, "qwen3:4b", new FakeMemory(new RecalledMemory(MemoryKind.Decision, note, 0.20)));
 
-        await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.Contains(note, chat.LastUser);
         Assert.Contains("only if directly relevant", chat.LastUser, StringComparison.OrdinalIgnoreCase);
@@ -122,7 +122,7 @@ public class LlmAdvisorTests
         var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
         var advisor = new LlmAdvisor(chat, "qwen3:4b", new FakeMemory(new RecalledMemory(MemoryKind.PersonFact, note, 0.55)));
 
-        await advisor.ConsiderAsync(Context(), Context()[^1], CancellationToken.None);
+        await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
 
         Assert.DoesNotContain(note, chat.LastUser);
     }
@@ -137,8 +137,21 @@ public class LlmAdvisorTests
         var advisor = new LlmAdvisor(chat, "qwen3:4b", memory);
         var context = MultiLineContext();
 
-        await advisor.ConsiderAsync(context, context[^1], CancellationToken.None);
+        await advisor.ConsiderAsync(context, context[^1], [], CancellationToken.None);
 
         Assert.Equal(context[^1].Caption, memory.LastQuery);
+    }
+
+    [Fact]
+    public async Task RecentAdvice_IsInjectedWithDoNotRepeatFraming()
+    {
+        const string prior = "Redacted is a prison-escape roguelike where players reanimate as zombies.";
+        var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+        var advisor = new LlmAdvisor(chat, "qwen3:4b");
+
+        await advisor.ConsiderAsync(Context(), Context()[^1], [prior], CancellationToken.None);
+
+        Assert.Contains(prior, chat.LastUser);
+        Assert.Contains("do not repeat", chat.LastUser, StringComparison.OrdinalIgnoreCase);
     }
 }

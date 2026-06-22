@@ -54,10 +54,11 @@ public sealed class LlmAdvisor : IAdvisor
     }
 
     public async Task<AdviceEvent?> ConsiderAsync(
-        IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct)
+        IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+        IReadOnlyList<string> recentAdvice, CancellationToken ct)
     {
         var recalled = await RecallAsync(latest, ct).ConfigureAwait(false);
-        var prompt = BuildPrompt(context, recalled);
+        var prompt = BuildPrompt(context, recalled, recentAdvice);
         // A single short JSON advice object; 300 tokens is ample and keeps latency low.
         var raw = await _chat.CompleteAsync(_model, SystemPrompt, prompt, jsonMode: true, maxTokens: 300, ct)
             .ConfigureAwait(false);
@@ -104,7 +105,8 @@ public sealed class LlmAdvisor : IAdvisor
         }
     }
 
-    private static string BuildPrompt(IReadOnlyList<CaptionEvent> context, IReadOnlyList<RecalledMemory> recalled)
+    private static string BuildPrompt(
+        IReadOnlyList<CaptionEvent> context, IReadOnlyList<RecalledMemory> recalled, IReadOnlyList<string> recentAdvice)
     {
         var sb = new StringBuilder();
         if (recalled.Count > 0)
@@ -118,13 +120,26 @@ public sealed class LlmAdvisor : IAdvisor
             sb.AppendLine();
         }
 
+        if (recentAdvice.Count > 0)
+        {
+            sb.AppendLine("You have ALREADY given this advice in this meeting. Do NOT repeat or rephrase any");
+            sb.AppendLine("of it — only advise if you have something genuinely new to add:");
+            foreach (var advice in recentAdvice)
+            {
+                sb.Append("- ").AppendLine(advice);
+            }
+            sb.AppendLine();
+        }
+
         var start = Math.Max(0, context.Count - ContextLines);
         sb.AppendLine("Recent transcript:");
         for (var i = start; i < context.Count; i++)
         {
             sb.Append(context[i].SpeakerName).Append(": ").AppendLine(context[i].Caption);
         }
-        sb.AppendLine().Append("Should you advise \"Me\" now? Reply with the JSON object only.");
+        sb.AppendLine().Append(
+            "Based on the LATEST line, should you advise \"Me\" now (something new, not already said "
+            + "above)? Reply with the JSON object only.");
         return sb.ToString();
     }
 
