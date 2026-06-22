@@ -106,16 +106,21 @@ public static class ListenCommand
                 captions.EnableAdvicePanel();
                 coach = new CoachEngine(advisor, coachMemory, stem);
                 coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+                // One place maps a coach activity to its panel presentation; seed the resting
+                // state so the panel shows "Listening" before the first utterance.
+                static (string Text, string Colour) Present(CoachActivity activity) => activity switch
+                {
+                    CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
+                    CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
+                    _ => ("○ Listening", "grey"),
+                };
                 coach.ActivityChanged += activity =>
                 {
-                    var (text, colour) = activity switch
-                    {
-                        CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
-                        CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
-                        _ => ("○ Listening", "grey"),
-                    };
+                    var (text, colour) = Present(activity);
                     captions.SetCoachActivity(text, colour);
                 };
+                var (restText, restColour) = Present(CoachActivity.Listening);
+                captions.SetCoachActivity(restText, restColour);
                 captions.CaptionEmitted += coach.Observe;
             }
 

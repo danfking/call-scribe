@@ -360,7 +360,8 @@ public sealed class LiveStatusDisplay : IDisposable
             IRenderable body = transcript;
             if (_showAdvice)
             {
-                var advice = new Panel(new Rows(BuildCoachActivity(), BuildAdvice()))
+                // Activity line, a blank separator, then the advice log — spacing via Rows only.
+                var advice = new Panel(new Rows(BuildCoachActivity(), new Markup(""), BuildAdvice()))
                     .Header("[magenta] coach [/]")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
@@ -411,13 +412,10 @@ public sealed class LiveStatusDisplay : IDisposable
     }
 
     /// <summary>The coach status line above the advice log: shows what the coach is doing now
-    /// (thinking / listening / considered-nothing-to-add). Defaults to a quiet "Listening" until
-    /// the engine reports otherwise, so the panel never looks dead.</summary>
-    private IRenderable BuildCoachActivity()
-    {
-        var (text, colour) = _coachActivity ?? ("○ Listening", "grey");
-        return new Markup($"[{colour}]{text.EscapeMarkup()}[/]\n");
-    }
+    /// (thinking / listening / considered-nothing-to-add). The text/colour are set by the wiring,
+    /// which seeds the resting "Listening" state up front; blank until then.</summary>
+    private IRenderable BuildCoachActivity() =>
+        _coachActivity is { } a ? new Markup($"[{a.Colour}]{a.Text.EscapeMarkup()}[/]") : new Markup("");
 
     private IRenderable BuildAdvice()
     {
