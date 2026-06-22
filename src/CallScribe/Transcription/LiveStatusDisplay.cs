@@ -50,6 +50,12 @@ public sealed class LiveStatusDisplay : IDisposable
     // (speaker-coalesced, possibly long) entry wraps to.
     private const int TranscriptPrefixWidth = 18;
 
+    // Cap on a coalesced entry's length: a turn keeps growing one entry until it gets this long,
+    // then continues in a fresh entry (same speaker). Keeps normal turns as a single entry while
+    // bounding a multi-paragraph monologue, so one entry can't grow without limit or, once it
+    // exceeds the visible rows, crop the footer off screen.
+    private const int MaxEntryChars = 1200;
+
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
 
@@ -130,8 +136,9 @@ public sealed class LiveStatusDisplay : IDisposable
         {
             // The live engine flushes speech in short chunks; while the same speaker keeps talking,
             // grow their existing line instead of printing a new one per chunk (much less noisy).
-            // The entry keeps its original timestamp (when the turn started).
-            if (_captions.Count > 0 && _captions[^1].Label == label)
+            // The entry keeps its original timestamp (when the turn started). A turn that runs past
+            // MaxEntryChars continues in a fresh entry so one entry can't grow without bound.
+            if (_captions.Count > 0 && _captions[^1].Label == label && _captions[^1].Text.Length < MaxEntryChars)
             {
                 var prev = _captions[^1];
                 _captions[^1] = prev with { Text = $"{prev.Text} {caption}" };
