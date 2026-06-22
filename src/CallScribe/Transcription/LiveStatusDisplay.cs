@@ -41,6 +41,11 @@ public sealed class LiveStatusDisplay : IDisposable
     // Keep memory bounded; only the tail that fits the window is ever rendered.
     private const int MaxCaptions = 500;
 
+    // When the coach panel is shown it stacks below the transcript: it shows a small fixed block
+    // of recent advice, and the transcript reserves that much vertical space for it.
+    private const int CoachAdviceRows = 6;
+    private const int CoachPanelRows = CoachAdviceRows + 4; // advice + activity line + panel chrome
+
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
 
@@ -360,7 +365,9 @@ public sealed class LiveStatusDisplay : IDisposable
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
                     .Expand();
-                body = new Columns(transcript, advice) { Expand = true };
+                // Stack the coach below the transcript (full width), so the transcript keeps the
+                // full line width for long captions instead of being squeezed into half.
+                body = new Rows(transcript, advice);
             }
 
             return new Rows(header, cards, body, footer);
@@ -385,8 +392,10 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private IRenderable BuildTranscript()
     {
-        // Show the tail that fits, leaving room for the header, cards, borders, footer.
-        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        // Show the tail that fits, leaving room for the header, cards, borders, footer, and (when
+        // shown) the coach panel stacked below.
+        var reserved = _showAdvice ? CoachPanelRows : 0;
+        var visible = Math.Max(3, SafeWindowHeight() - 12 - reserved);
         var slice = _captions.Count > visible
             ? _captions.GetRange(_captions.Count - visible, visible)
             : _captions;
@@ -412,8 +421,8 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private IRenderable BuildAdvice()
     {
-        // One row tighter than the transcript to make room for the coach activity line above.
-        var visible = Math.Max(3, SafeWindowHeight() - 13);
+        // A small fixed block of the most recent advice; the panel sits below the transcript.
+        var visible = CoachAdviceRows;
         var slice = _advice.Count > visible
             ? _advice.GetRange(_advice.Count - visible, visible)
             : _advice;
