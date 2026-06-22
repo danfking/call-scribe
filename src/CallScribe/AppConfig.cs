@@ -97,6 +97,35 @@ public sealed class AppConfig
     [JsonPropertyName("voiceprintMaxDistance")]
     public double VoiceprintMaxDistance { get; set; } = 0.30;
 
+    /// <summary>Clustering threshold for the offline diarizer (higher = fewer, coarser
+    /// speakers). The sherpa default of 0.5 over-fragments real meeting audio into dozens of
+    /// short clusters; ~0.75 keeps genuinely distinct voices apart while collapsing the
+    /// fragment tail. Tuned against real recordings (see tools/DiarizeEval).</summary>
+    [JsonPropertyName("diarizationClusterThreshold")]
+    public float DiarizationClusterThreshold { get; set; } = 0.75f;
+
+    /// <summary>After diarization, any speaker cluster with less than this many seconds of
+    /// speech is folded into its nearest substantial cluster by voiceprint, so a brief turn is
+    /// attributed to the right person instead of spawning a new "Speaker N". 0 disables the
+    /// merge.</summary>
+    [JsonPropertyName("diarizationMinClusterSeconds")]
+    public double DiarizationMinClusterSeconds { get; set; } = 8.0;
+
+    /// <summary>Max cosine distance to merge a live far-side caption into an existing session
+    /// speaker instead of minting a new "Speaker N". Looser than the enrolled-match threshold
+    /// because clustering one meeting's voices is more forgiving than asserting an identity;
+    /// raise it if one person fragments into several speakers live, lower it if distinct people
+    /// get merged.</summary>
+    [JsonPropertyName("sessionMergeDistance")]
+    public double SessionMergeDistance { get; set; } = 0.55;
+
+    /// <summary>A live far-side caption shorter than this many seconds is too brief to embed
+    /// reliably, so it attaches to the nearest existing session speaker rather than minting a new
+    /// one (short "yeah"/"okay" turns were the main source of live speaker fragmentation). 0
+    /// disables the gate. Only affects live labels; the after-meeting pass is authoritative.</summary>
+    [JsonPropertyName("liveMinSpeakerSeconds")]
+    public double LiveMinSpeakerSeconds { get; set; } = 1.5;
+
     /// <summary>Filename of the pyannote speaker-segmentation ONNX model under the models
     /// directory (used by offline diarization to find speech turns).</summary>
     [JsonPropertyName("speakerSegModel")]

@@ -36,7 +36,8 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         if (embedder == null) return null;
 
         var voiceprints = await TryCreateVoiceprintsAsync(config, embedder.Dimensions, ct).ConfigureAwait(false);
-        var resolver = new SpeakerResolver(voiceprints, config.VoiceprintMaxDistance);
+        var resolver = new SpeakerResolver(
+            voiceprints, config.VoiceprintMaxDistance, config.SessionMergeDistance, config.LiveMinSpeakerSeconds);
         return new SpeakerIdentity(embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance);
     }
 
@@ -46,7 +47,8 @@ public sealed class SpeakerIdentity : IAsyncDisposable
     {
         var embedding = _embedder.Embed(samples16kMono);
         if (embedding.Length == 0) return LiveCaptionEngine.OthersLabel;
-        return await _resolver.ResolveAsync(embedding, ct).ConfigureAwait(false);
+        var clipSeconds = samples16kMono.Length / (double)SpeakerAudio.SampleRate;
+        return await _resolver.ResolveAsync(embedding, clipSeconds, ct).ConfigureAwait(false);
     }
 
     /// <summary>Apply a live name assignment: rename the session speaker so future captions use
@@ -126,7 +128,7 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         var seg = ModelPath(config.SpeakerSegModel);
         var emb = ModelPath(config.SpeakerEmbedModel);
         if (seg == null || emb == null) return null;
-        try { return new SherpaDiarizer(seg, emb); }
+        try { return new SherpaDiarizer(seg, emb, clusterThreshold: config.DiarizationClusterThreshold); }
         catch { return null; }
     }
 

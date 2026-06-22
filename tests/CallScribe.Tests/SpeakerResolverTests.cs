@@ -51,7 +51,7 @@ public class SpeakerResolverTests
         var store = new FakeVoiceprints(new VoiceprintMatch("Gavin", 0.12));
         var resolver = new SpeakerResolver(store, enrolledMaxDistance: 0.30);
 
-        var name = await resolver.ResolveAsync([1f, 0f, 0f], CancellationToken.None);
+        var name = await resolver.ResolveAsync([1f, 0f, 0f], double.MaxValue, CancellationToken.None);
 
         Assert.Equal("Gavin", name);
     }
@@ -62,7 +62,7 @@ public class SpeakerResolverTests
         var store = new FakeVoiceprints(new VoiceprintMatch("Gavin", 0.80)); // beyond threshold
         var resolver = new SpeakerResolver(store, enrolledMaxDistance: 0.30);
 
-        var name = await resolver.ResolveAsync([1f, 0f, 0f], CancellationToken.None);
+        var name = await resolver.ResolveAsync([1f, 0f, 0f], double.MaxValue, CancellationToken.None);
 
         Assert.Equal("Speaker 1", name);
     }
@@ -73,7 +73,7 @@ public class SpeakerResolverTests
         var store = new FakeVoiceprints(match: null);
         var resolver = new SpeakerResolver(store);
 
-        var name = await resolver.ResolveAsync([1f, 0f, 0f], CancellationToken.None);
+        var name = await resolver.ResolveAsync([1f, 0f, 0f], double.MaxValue, CancellationToken.None);
 
         Assert.Equal("Speaker 1", name);
     }
@@ -113,10 +113,37 @@ public class SpeakerResolverTests
         var store = new FakeVoiceprints(new VoiceprintMatch("Joe", 0.10));
         var resolver = new SpeakerResolver(store, enrolledMaxDistance: 0.30);
 
-        var name = await resolver.ResolveAsync([1f, 0f, 0f], CancellationToken.None);
+        var name = await resolver.ResolveAsync([1f, 0f, 0f], double.MaxValue, CancellationToken.None);
         Assert.Equal("Joe", name);
 
         Assert.NotNull(resolver.Rename("Joe", "Bob"));
+    }
+
+    [Fact]
+    public void AssignSession_ShortClip_AttachesToNearestSpeaker_InsteadOfMinting()
+    {
+        // The live fragmentation fix: a too-short clip (a quick "yeah"/"okay") is too brief to
+        // embed reliably, so it joins the nearest existing speaker rather than spawning a new one.
+        var resolver = new SpeakerResolver(store: null, minSpeakerSeconds: 1.5);
+        Assert.Equal("Speaker 1", resolver.AssignSession([1f, 0f, 0f])); // long clip -> mints
+
+        // Orthogonal embedding would normally mint Speaker 2, but the short clip attaches instead.
+        Assert.Equal("Speaker 1", resolver.AssignSession([0f, 1f, 0f], clipSeconds: 0.5));
+    }
+
+    [Fact]
+    public void AssignSession_ShortClip_StaysGeneric_WhenNoSpeakersYet()
+    {
+        var resolver = new SpeakerResolver(store: null, minSpeakerSeconds: 1.5);
+        Assert.Equal(LiveCaptionEngine.OthersLabel, resolver.AssignSession([1f, 0f, 0f], clipSeconds: 0.5));
+    }
+
+    [Fact]
+    public void AssignSession_LongClip_StillMintsNewSpeaker_DespiteGate()
+    {
+        var resolver = new SpeakerResolver(store: null, minSpeakerSeconds: 1.5);
+        resolver.AssignSession([1f, 0f, 0f]);
+        Assert.Equal("Speaker 2", resolver.AssignSession([0f, 1f, 0f], clipSeconds: 3.0));
     }
 }
 

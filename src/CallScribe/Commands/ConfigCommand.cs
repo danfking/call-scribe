@@ -16,7 +16,8 @@ public static class ConfigCommand
                           + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
                           + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
                           + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
-                          + "selfSpeakerName | selfMatchMaxDistance",
+                          + "selfSpeakerName | selfMatchMaxDistance | diarizationClusterThreshold | "
+                          + "diarizationMinClusterSeconds | sessionMergeDistance | liveMinSpeakerSeconds",
         };
         var valueArgument = new Argument<string>("value")
         {
@@ -63,6 +64,10 @@ public static class ConfigCommand
         table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
         table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
         table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
+        table.AddRow("diarizationClusterThreshold", config.DiarizationClusterThreshold.ToString("0.##"), "0.75");
+        table.AddRow("diarizationMinClusterSeconds", config.DiarizationMinClusterSeconds.ToString("0.##"), "8");
+        table.AddRow("sessionMergeDistance", config.SessionMergeDistance.ToString("0.##"), "0.55");
+        table.AddRow("liveMinSpeakerSeconds", config.LiveMinSpeakerSeconds.ToString("0.##"), "1.5");
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]Config file: {AppConfig.ConfigPath.EscapeMarkup()}[/]");
@@ -144,6 +149,18 @@ public static class ConfigCommand
                 break;
             case "selfmatchmaxdistance":
                 config.SelfMatchMaxDistance = cleared ? 0.6 : double.Parse(value);
+                break;
+            case "diarizationclusterthreshold":
+                config.DiarizationClusterThreshold = cleared ? 0.75f : float.Parse(value);
+                break;
+            case "diarizationminclusterseconds":
+                config.DiarizationMinClusterSeconds = cleared ? 8.0 : double.Parse(value);
+                break;
+            case "sessionmergedistance":
+                config.SessionMergeDistance = cleared ? 0.55 : double.Parse(value);
+                break;
+            case "liveminspeakerseconds":
+                config.LiveMinSpeakerSeconds = cleared ? 1.5 : double.Parse(value);
                 break;
             default:
                 AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");
