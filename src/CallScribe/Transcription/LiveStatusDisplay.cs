@@ -22,6 +22,7 @@ public sealed class LiveStatusDisplay : IDisposable
     private string _model = "";
     private bool _started;
     private bool _showAdvice;
+    private (string Text, string Colour)? _coachActivity;
     private volatile bool _running;
     private Task? _liveTask;
 
@@ -69,6 +70,15 @@ public sealed class LiveStatusDisplay : IDisposable
     public void SetState(string label, TrackState state)
     {
         lock (_lock) _states[label] = state;
+        _dirty = true;
+    }
+
+    /// <summary>Set the coach activity line shown at the top of the coach panel (e.g. thinking,
+    /// listening, considered-nothing-to-add). Presentation hints are passed in as primitives so
+    /// this class stays independent of the coach namespace, like <see cref="PrintAdvice"/>.</summary>
+    public void SetCoachActivity(string text, string colour)
+    {
+        lock (_lock) _coachActivity = (text, colour);
         _dirty = true;
     }
 
@@ -345,7 +355,7 @@ public sealed class LiveStatusDisplay : IDisposable
             IRenderable body = transcript;
             if (_showAdvice)
             {
-                var advice = new Panel(BuildAdvice())
+                var advice = new Panel(new Rows(BuildCoachActivity(), BuildAdvice()))
                     .Header("[magenta] coach [/]")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
@@ -391,9 +401,19 @@ public sealed class LiveStatusDisplay : IDisposable
         return new Markup(string.Join("\n", lines));
     }
 
+    /// <summary>The coach status line above the advice log: shows what the coach is doing now
+    /// (thinking / listening / considered-nothing-to-add). Defaults to a quiet "Listening" until
+    /// the engine reports otherwise, so the panel never looks dead.</summary>
+    private IRenderable BuildCoachActivity()
+    {
+        var (text, colour) = _coachActivity ?? ("○ Listening", "grey");
+        return new Markup($"[{colour}]{text.EscapeMarkup()}[/]\n");
+    }
+
     private IRenderable BuildAdvice()
     {
-        var visible = Math.Max(3, SafeWindowHeight() - 12);
+        // One row tighter than the transcript to make room for the coach activity line above.
+        var visible = Math.Max(3, SafeWindowHeight() - 13);
         var slice = _advice.Count > visible
             ? _advice.GetRange(_advice.Count - visible, visible)
             : _advice;

@@ -94,6 +94,11 @@ public sealed class LiveCaptionEngine : IDisposable
     public void PrintAdvice(DateTime at, string colour, string glyph, string text) =>
         _display.PrintAdvice(at, colour, glyph, text);
 
+    /// <summary>Forward the coach's current activity (thinking / listening / nothing-to-add) to
+    /// the dashboard status line. Primitives keep this class independent of the coach namespace.</summary>
+    public void SetCoachActivity(string text, string colour) =>
+        _display.SetCoachActivity(text, colour);
+
     /// <summary>Callback for the dashboard's /assign-name command (rename + persist a speaker).</summary>
     public Func<string, string, CancellationToken, Task<bool>>? OnAssignName
     {

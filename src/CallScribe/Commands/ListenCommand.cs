@@ -106,6 +106,16 @@ public static class ListenCommand
                 captions.EnableAdvicePanel();
                 coach = new CoachEngine(advisor, coachMemory, stem);
                 coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+                coach.ActivityChanged += activity =>
+                {
+                    var (text, colour) = activity switch
+                    {
+                        CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
+                        CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
+                        _ => ("○ Listening", "grey"),
+                    };
+                    captions.SetCoachActivity(text, colour);
+                };
                 captions.CaptionEmitted += coach.Observe;
             }
 
