@@ -165,6 +165,24 @@ public static class ListenCommand
                 // Captions are fully emitted now; drain any advice still in flight.
                 await coach.CompleteAsync().ConfigureAwait(false);
             }
+            // Fold the meeting's fragmented live speaker labels now the whole recording is in, and
+            // rewrite the persisted live transcript so the consolidated names flow through into the
+            // memory consolidation below (and any later read of the live transcript). Best-effort and
+            // only meaningful when both speaker-id and the coach's transcript store are present.
+            if (speakerId != null && coachMemory != null)
+            {
+                try
+                {
+                    var remap = speakerId.ConsolidateSession();
+                    if (remap.Count > 0)
+                    {
+                        var relabelled = await coachMemory.RelabelAsync(stem, remap, CancellationToken.None).ConfigureAwait(false);
+                        AnsiConsole.MarkupLine(
+                            $"[grey]Consolidated {remap.Count} fragmented speaker label(s); relabelled {relabelled} caption(s).[/]");
+                    }
+                }
+                catch { /* best-effort: the live labels simply stay as they were */ }
+            }
             if (coachMemory != null)
             {
                 // Consolidate the meeting into durable memories for future recall. Run it on a

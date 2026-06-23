@@ -132,6 +132,24 @@ public sealed class AppConfig
     [JsonPropertyName("liveMinSpeakerSeconds")]
     public double LiveMinSpeakerSeconds { get; set; } = 1.5;
 
+    /// <summary>Max cosine distance for the after-meeting pass that folds the meeting's
+    /// fragmented live speaker labels together. The live resolver clusters one clip at a time and
+    /// can never un-split a person it once minted a second "Speaker N" for; once the meeting's
+    /// audio is in, this pass re-examines all the (now-stable, averaged) session centroids and
+    /// merges any pair within this distance, then rewrites the persisted live transcript. Looser
+    /// than <see cref="SessionMergeDistance"/> on purpose, since averaged centroids are steadier
+    /// than a single clip; lower it if distinct people get merged, 0 disables the pass.</summary>
+    [JsonPropertyName("speakerConsolidationDistance")]
+    public double SpeakerConsolidationDistance { get; set; } = 0.80;
+
+    /// <summary>Minimum number of live clips for a session speaker to count as a real person that
+    /// the consolidation pass protects; any label with fewer clips is treated as a fragment and
+    /// folded into the nearest real speaker (within <see cref="SpeakerConsolidationDistance"/>).
+    /// Raise it to fold more aggressively (more borderline clusters treated as fragments), lower it
+    /// to protect more clusters from being merged away.</summary>
+    [JsonPropertyName("speakerConsolidationMinClips")]
+    public int SpeakerConsolidationMinClips { get; set; } = 3;
+
     /// <summary>Filename of the pyannote speaker-segmentation ONNX model under the models
     /// directory (used by offline diarization to find speech turns).</summary>
     [JsonPropertyName("speakerSegModel")]

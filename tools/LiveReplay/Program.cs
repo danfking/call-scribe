@@ -17,7 +17,9 @@ using Whisper.net.Ggml;
 //   dotnet run --project tools/LiveReplay -- --stem 2026-06-23-0931 --live-model small.en [--session-merge 0.7]
 
 string? stem = null, liveModel = null, outPath = null;
-double? merge = null, minSpeaker = null;
+double? merge = null, minSpeaker = null, consolidateDistance = null;
+int? consolidateMinSupport = null;
+bool consolidate = false;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -26,6 +28,11 @@ for (var i = 0; i < args.Length; i++)
         case "--live-model": liveModel = Arg(ref i); break;
         case "--session-merge": merge = double.Parse(Arg(ref i)); break;
         case "--min-speaker-seconds": minSpeaker = double.Parse(Arg(ref i)); break;
+        // Apply the after-meeting speaker-consolidation pass to the replayed transcript, so the
+        // emitted labels match what a real `listen` would persist after #35's stop-time fold. With
+        // a value, A/B that merge distance; bare, use the configured SpeakerConsolidationDistance.
+        case "--consolidate": consolidate = true; if (i + 1 < args.Length && double.TryParse(args[i + 1], out var cd)) { consolidateDistance = cd; i++; } break;
+        case "--consolidate-min-support": consolidateMinSupport = int.Parse(Arg(ref i)); break;
         case "--out": outPath = Arg(ref i); break;
         default: Console.Error.WriteLine($"Unknown argument: {args[i]}"); return 2;
     }
@@ -33,7 +40,7 @@ for (var i = 0; i < args.Length; i++)
 string Arg(ref int i) => ++i < args.Length ? args[i] : throw new ArgumentException("missing value for option");
 if (stem is null)
 {
-    Console.Error.WriteLine("Usage: LiveReplay --stem <stem> [--live-model base.en] [--session-merge d] [--min-speaker-seconds d] [--out file]");
+    Console.Error.WriteLine("Usage: LiveReplay --stem <stem> [--live-model base.en] [--session-merge d] [--min-speaker-seconds d] [--consolidate [d]] [--consolidate-min-support n] [--out file]");
     return 2;
 }
 
@@ -79,11 +86,26 @@ captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", othersReader, othersFor
 captions.Attach(LiveCaptionEngine.MeLabel, "cyan", meReader, meFormat);
 
 await captions.CompleteAsync();
+
+// After-meeting speaker consolidation (#35): fold the fragmented session labels with the whole
+// recording's stable centroids, then map the emitted captions through the result, mirroring what a
+// real `listen` persists at stop. Done before disposing the resolver, which owns the centroids.
+IReadOnlyDictionary<string, string> remap = new Dictionary<string, string>();
+if (consolidate && speakerId is not null)
+{
+    remap = speakerId.ConsolidateSession(consolidateDistance, consolidateMinSupport);
+    Console.WriteLine($"consolidation merged {remap.Count} fragmented label(s) at distance "
+        + $"{consolidateDistance?.ToString() ?? config.SpeakerConsolidationDistance.ToString()}, "
+        + $"min-support {consolidateMinSupport?.ToString() ?? config.SpeakerConsolidationMinClips.ToString()}");
+}
 if (speakerId is not null) await speakerId.DisposeAsync();
 
 var ordered = collected.OrderBy(e => e.At).ToList();
 var t0 = ordered.Count > 0 ? ordered[0].At : DateTime.Now;
-var lines = ordered.Select(e => new ReplayLine((e.At - t0).TotalSeconds, e.SpeakerName, e.Caption));
+var lines = ordered.Select(e => new ReplayLine(
+    (e.At - t0).TotalSeconds,
+    remap.TryGetValue(e.SpeakerName, out var merged) ? merged : e.SpeakerName,
+    e.Caption));
 outPath ??= Path.Combine(AppPaths.TranscriptsDir, $"{stem}.live.{liveModel}.json");
 File.WriteAllText(outPath, JsonSerializer.Serialize(lines, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine($"replayed live transcript: {ordered.Count} lines -> {outPath}");

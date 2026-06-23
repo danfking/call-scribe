@@ -22,6 +22,11 @@ public interface IMemoryStore : IAsyncDisposable
     /// <summary>Read back a meeting's transcript in time order (for consolidation).</summary>
     Task<IReadOnlyList<TranscriptLine>> GetTranscriptAsync(string meetingId, CancellationToken ct);
 
+    /// <summary>Rewrite a meeting's persisted speaker labels in place: each <paramref name="remap"/>
+    /// entry renames every segment from the old label to the new one. Used by the after-meeting
+    /// speaker-consolidation pass to fold fragmented live labels. Returns the number of rows changed.</summary>
+    Task<int> RelabelAsync(string meetingId, IReadOnlyDictionary<string, string> remap, CancellationToken ct);
+
     /// <summary>Delete stored memories — all of them, or just one meeting's when
     /// <paramref name="meetingId"/> is given. Returns the number deleted.</summary>
     Task<int> ClearMemoriesAsync(string? meetingId, CancellationToken ct);

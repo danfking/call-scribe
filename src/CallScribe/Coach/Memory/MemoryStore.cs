@@ -125,6 +125,22 @@ public sealed class MemoryStore : IMemoryStore, IAsyncDisposable
         return segments;
     }
 
+    public async Task<int> RelabelAsync(string meetingId, IReadOnlyDictionary<string, string> remap, CancellationToken ct)
+    {
+        var changed = 0;
+        foreach (var (oldLabel, newLabel) in remap)
+        {
+            if (oldLabel == newLabel) continue;
+            await using var cmd = _dataSource.CreateCommand(
+                "UPDATE transcript_segments SET speaker = $1 WHERE meeting_id = $2 AND speaker = $3");
+            cmd.Parameters.Add(new NpgsqlParameter { Value = newLabel });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = meetingId });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = oldLabel });
+            changed += await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        return changed;
+    }
+
     public async Task<int> ClearMemoriesAsync(string? meetingId, CancellationToken ct)
     {
         var sql = meetingId is null

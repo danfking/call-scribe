@@ -132,6 +132,57 @@ public sealed class SpeakerResolver
         }
     }
 
+    /// <summary>Post-hoc consolidation of the session's speakers, run once the meeting's audio is
+    /// in and the centroids have stabilised. The online pass mints a new "Speaker N" whenever a
+    /// noisy clip lands beyond <c>sessionMergeDistance</c> of every existing centroid and can never
+    /// undo it, so one person fragments into several labels — mostly brief, low-support fragments
+    /// (a quick "yeah", a clipped word) that the single-pass clustering couldn't place.
+    ///
+    /// <para>This mirrors the offline <c>MergeSmallClusters</c>: a cluster with at least
+    /// <paramref name="minSupport"/> clips is treated as a real speaker and protected, and each
+    /// fragment below that is folded into its nearest substantial cluster when within
+    /// <paramref name="mergeDistance"/>. Deliberately it never merges two substantial clusters with
+    /// each other: on noisy live embeddings two real speakers can sit closer than a person's own
+    /// fragments, so a blanket pairwise merge collapses distinct people (measured: attribution falls
+    /// from ~96% to ~60%). Folding only the fragments keeps each real speaker intact.</para>
+    ///
+    /// Returns a map from each folded-away label to its surviving label so the caller can rewrite
+    /// the already-emitted transcript.</summary>
+    public IReadOnlyDictionary<string, string> Consolidate(double mergeDistance, int minSupport = 2)
+    {
+        lock (_lock)
+        {
+            var remap = new Dictionary<string, string>();
+            var substantial = _session.Where(s => s.Count >= minSupport).ToList();
+            if (substantial.Count == 0) return remap; // nothing solid to fold fragments into
+
+            foreach (var fragment in _session.Where(s => s.Count < minSupport).ToList())
+            {
+                SessionSpeaker? nearest = null;
+                var bestDistance = double.MaxValue;
+                foreach (var speaker in substantial)
+                {
+                    var d = VectorMath.CosineDistance(fragment.Centroid, speaker.Centroid);
+                    if (d < bestDistance) { bestDistance = d; nearest = speaker; }
+                }
+                if (nearest == null || bestDistance > mergeDistance) continue; // too far from any real speaker: keep it
+
+                nearest.Centroid = WeightedMean(nearest.Centroid, nearest.Count, fragment.Centroid, fragment.Count);
+                nearest.Count += fragment.Count;
+                _session.Remove(fragment);
+                remap[fragment.Label] = nearest.Label;
+            }
+            return remap;
+        }
+    }
+
+    private static float[] WeightedMean(float[] c1, int n1, float[] c2, int n2)
+    {
+        var result = new float[c1.Length];
+        for (var i = 0; i < result.Length; i++) result[i] = (c1[i] * n1 + c2[i] * n2) / (n1 + n2);
+        return result;
+    }
+
     /// <summary>Rename a session speaker (e.g. from a live /assign-name) so future captions in
     /// that voice use <paramref name="newLabel"/>, and return its averaged voiceprint for
     /// enrollment. Null when no current session speaker carries <paramref name="oldLabel"/>.</summary>

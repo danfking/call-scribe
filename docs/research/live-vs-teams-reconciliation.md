@@ -45,10 +45,15 @@ closes to ~21-22%, final can be retired. The bar is **parity with final, not par
 1. **Live model `base.en` → `small.en`** (config, low). The `--live-model` flag already accepts it
    (`ListenCommand.cs:21-25`); flip the default (config-backed so weak machines can opt down).
    Largest content lever: expect WER ~21-22%, CER ~14%, and fewer hallucination/repetition loops.
-2. **Live speaker consolidation** (structural, high). Give `SpeakerResolver.AssignSession` a deferred
-   pass mirroring offline `MergeSmallClusters` (`OfflineDiarization.cs:122-165`): fold low-count/low-
-   second session centroids into the nearest substantial one, and retro-relabel the persisted live
-   transcript. This is the blocker; targets the fragment tail without touching the 97% attribution.
+2. **Live speaker consolidation** (structural, high). **Done (#35).** A deferred `SpeakerResolver.Consolidate`
+   pass mirroring offline `MergeSmallClusters` (`OfflineDiarization.cs:122-165`), wired into the
+   `listen` stop flow, which rewrites the persisted live transcript via `IMemoryStore.RelabelAsync`.
+   Measured A/B on `0931` (LiveReplay + reconcile vs Teams): far-side labels **24 → 8** (true ~7) with
+   word attribution **flat at 96%** and WER unchanged. Key finding: a blanket agglomerative "merge the
+   closest pair" collapses *distinct* speakers (Kiel+Deon sit <0.72 apart on noisy live embeddings, so
+   attribution fell to ~55-65%). The working form folds only **low-support fragments** (`< minClips`,
+   default 3) into the nearest **substantial** cluster within `SpeakerConsolidationDistance` (0.80) and
+   never merges two substantial clusters — that protection is what holds attribution.
 3. **Loosen live merge threshold** (config, low; do before/with Item 2). Raise `SessionMergeDistance`
    (0.55 → ~0.7) and/or `LiveMinSpeakerSeconds`; tune empirically against `0931` + `0933.others.wav`
    (0.75 is the sherpa segmentation value, *not* a like-for-like for `AssignSession`).
