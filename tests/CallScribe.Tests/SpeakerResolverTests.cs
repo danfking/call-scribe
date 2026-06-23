@@ -201,6 +201,22 @@ public class SpeakerResolverTests
     }
 
     [Fact]
+    public void Consolidate_ProtectsNamedSpeaker_FromBeingFoldedAway()
+    {
+        // A correctly named (enrolled) speaker keeps their name even with few clips: only anonymous
+        // "Speaker N" fragments are folded, never a real name (else consolidation could demote it).
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]);
+        resolver.AssignSession([1f, 0f, 0f]);          // Speaker 1, count 2 (substantial)
+        resolver.AssignSession([0.8f, 0.6f, 0f]);      // Speaker 2, count 1
+        resolver.Rename("Speaker 2", "Joe");           // named, but only one clip
+
+        var remap = resolver.Consolidate(0.5, minSupport: 2);
+
+        Assert.False(remap.ContainsKey("Joe")); // never folded away despite low support
+    }
+
+    [Fact]
     public void Consolidate_NoSubstantialSpeakers_LeavesEverythingAlone()
     {
         var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);

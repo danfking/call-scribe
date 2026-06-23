@@ -53,7 +53,7 @@ closes to ~21-22%, final can be retired. The bar is **parity with final, not par
    closest pair" collapses *distinct* speakers (Kiel+Deon sit <0.72 apart on noisy live embeddings, so
    attribution fell to ~55-65%). The working form folds only **low-support fragments** (`< minClips`,
    default 3) into the nearest **substantial** cluster within `SpeakerConsolidationDistance` (0.80) and
-   never merges two substantial clusters — that protection is what holds attribution.
+   never merges two substantial clusters (that protection is what holds attribution).
 3. **Loosen live merge threshold** (config, low; do before/with Item 2). Raise `SessionMergeDistance`
    (0.55 → ~0.7) and/or `LiveMinSpeakerSeconds`; tune empirically against `0931` + `0933.others.wav`
    (0.75 is the sherpa segmentation value, *not* a like-for-like for `AssignSession`).

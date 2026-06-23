@@ -29,17 +29,24 @@ public static class VectorMath
 
     /// <summary>Running mean: fold one new sample into an averaged centroid built from
     /// <paramref name="count"/> prior samples. Returns a new array.</summary>
-    public static float[] RunningMean(ReadOnlySpan<float> centroid, int count, ReadOnlySpan<float> sample)
+    public static float[] RunningMean(ReadOnlySpan<float> centroid, int count, ReadOnlySpan<float> sample) =>
+        WeightedMean(centroid, count, sample, 1);
+
+    /// <summary>Weighted mean of two centroids, each standing for <paramref name="countA"/> /
+    /// <paramref name="countB"/> averaged samples. Used to fold one speaker cluster into another.
+    /// Accumulates in double so a long-running centroid does not lose precision. Returns a new array.</summary>
+    public static float[] WeightedMean(ReadOnlySpan<float> a, int countA, ReadOnlySpan<float> b, int countB)
     {
-        if (centroid.Length != sample.Length)
+        if (a.Length != b.Length)
         {
-            throw new ArgumentException($"Vector length mismatch: {centroid.Length} vs {sample.Length}.");
+            throw new ArgumentException($"Vector length mismatch: {a.Length} vs {b.Length}.");
         }
 
-        var result = new float[centroid.Length];
-        for (var i = 0; i < centroid.Length; i++)
+        var total = countA + countB;
+        var result = new float[a.Length];
+        for (var i = 0; i < a.Length; i++)
         {
-            result[i] = (float)(((double)centroid[i] * count + sample[i]) / (count + 1));
+            result[i] = (float)(((double)a[i] * countA + (double)b[i] * countB) / total);
         }
         return result;
     }
