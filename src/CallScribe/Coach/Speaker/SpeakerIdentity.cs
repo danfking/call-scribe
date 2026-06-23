@@ -15,16 +15,20 @@ public sealed class SpeakerIdentity : IAsyncDisposable
     private readonly IVoiceprintStore? _voiceprints;
     private readonly string? _selfName;
     private readonly double _selfThreshold;
+    private readonly double _consolidationDistance;
+    private readonly int _consolidationMinClips;
 
     private SpeakerIdentity(
         ISpeakerEmbedder embedder, SpeakerResolver resolver, IVoiceprintStore? voiceprints,
-        string? selfName, double selfThreshold)
+        string? selfName, double selfThreshold, double consolidationDistance, int consolidationMinClips)
     {
         _embedder = embedder;
         _resolver = resolver;
         _voiceprints = voiceprints;
         _selfName = string.IsNullOrWhiteSpace(selfName) ? null : selfName;
         _selfThreshold = selfThreshold;
+        _consolidationDistance = consolidationDistance;
+        _consolidationMinClips = consolidationMinClips;
     }
 
     /// <summary>Build the live service from config, or null if unavailable.</summary>
@@ -38,7 +42,9 @@ public sealed class SpeakerIdentity : IAsyncDisposable
         var voiceprints = await TryCreateVoiceprintsAsync(config, embedder.Dimensions, ct).ConfigureAwait(false);
         var resolver = new SpeakerResolver(
             voiceprints, config.VoiceprintMaxDistance, config.SessionMergeDistance, config.LiveMinSpeakerSeconds);
-        return new SpeakerIdentity(embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance);
+        return new SpeakerIdentity(
+            embedder, resolver, voiceprints, config.SelfSpeakerName, config.SelfMatchMaxDistance,
+            config.SpeakerConsolidationDistance, config.SpeakerConsolidationMinClips);
     }
 
     /// <summary>Resolve a far-side caption's 16 kHz mono samples to a speaker name, falling
@@ -72,6 +78,18 @@ public sealed class SpeakerIdentity : IAsyncDisposable
             catch { /* the live rename still applies even if persistence fails */ }
         }
         return true;
+    }
+
+    /// <summary>After the meeting, fold the session's fragmented far-side labels using the now-stable
+    /// averaged centroids, and return the resulting old→new label map (empty when nothing merges or
+    /// the pass is disabled). The caller rewrites the persisted transcript with it. Pass overrides for
+    /// the merge distance / min-clip support (e.g. the replay harness A/B'ing them); both default to
+    /// the configured <c>SpeakerConsolidation*</c> values.</summary>
+    public IReadOnlyDictionary<string, string> ConsolidateSession(double? mergeDistance = null, int? minSupport = null)
+    {
+        var distance = mergeDistance ?? _consolidationDistance;
+        if (distance <= 0) return new Dictionary<string, string>(); // pass disabled
+        return _resolver.Consolidate(distance, minSupport ?? _consolidationMinClips);
     }
 
     /// <summary>Decide whether a mic ("Me") caption is the user's own voice. Returns a

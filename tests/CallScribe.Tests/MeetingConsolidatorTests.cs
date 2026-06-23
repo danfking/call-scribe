@@ -24,6 +24,8 @@ public class MeetingConsolidatorTests
         public Task<IReadOnlyList<TranscriptLine>> GetTranscriptAsync(string m, CancellationToken ct) =>
             Task.FromResult(transcript);
         public Task<int> ClearMemoriesAsync(string? m, CancellationToken ct) => Task.FromResult(0);
+        public Task<int> RelabelAsync(string m, IReadOnlyDictionary<string, string> remap, CancellationToken ct) =>
+            Task.FromResult(0);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
         public Task StoreMemoryAsync(string m, MemoryKind kind, string text, string? person, CancellationToken ct)

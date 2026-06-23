@@ -112,6 +112,8 @@ public class LlmAdvisorTests
             Task.FromResult<IReadOnlyList<TranscriptLine>>([]);
 
         public Task<int> ClearMemoriesAsync(string? m, CancellationToken ct) => Task.FromResult(0);
+        public Task<int> RelabelAsync(string m, IReadOnlyDictionary<string, string> remap, CancellationToken ct) =>
+            Task.FromResult(0);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

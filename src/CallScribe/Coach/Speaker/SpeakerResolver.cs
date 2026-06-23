@@ -132,6 +132,60 @@ public sealed class SpeakerResolver
         }
     }
 
+    /// <summary>Post-hoc consolidation of the session's speakers, run once the meeting's audio is
+    /// in and the centroids have stabilised. The online pass mints a new "Speaker N" whenever a
+    /// noisy clip lands beyond <c>sessionMergeDistance</c> of every existing centroid and can never
+    /// undo it, so one person fragments into several anonymous labels, mostly brief low-support
+    /// fragments (a quick "yeah", a clipped word) the single-pass clustering couldn't place.
+    ///
+    /// <para>This mirrors the offline <c>MergeSmallClusters</c> (see <c>OfflineDiarization</c>): an
+    /// anonymous "Speaker N" with fewer than <paramref name="minSupport"/> clips is a fragment and is
+    /// folded into its nearest real speaker when within <paramref name="mergeDistance"/>. A real
+    /// speaker is any cluster with enough clips OR any cluster carrying an enrolled name, and is never
+    /// folded away (a correctly named person who spoke only a clip or two must keep their name).
+    /// Deliberately it never merges two real speakers with each other: on noisy live embeddings two
+    /// real speakers can sit closer than a person's own fragments, so a blanket pairwise merge
+    /// collapses distinct people (measured: attribution falls from ~96% to ~60%). Folding only the
+    /// fragments keeps each real speaker intact.</para>
+    ///
+    /// Returns a map from each folded-away label to its surviving label so the caller can rewrite
+    /// the already-emitted transcript.</summary>
+    public IReadOnlyDictionary<string, string> Consolidate(double mergeDistance, int minSupport = 3)
+    {
+        lock (_lock)
+        {
+            var remap = new Dictionary<string, string>();
+            // A fragment is an anonymous, low-support label; everything else (substantial, or named
+            // by an enrolled match) is a real speaker that fragments fold into but is never folded away.
+            var fragments = _session.Where(s => s.Count < minSupport && IsAnonymous(s.Label)).ToList();
+            var realSpeakers = _session.Where(s => s.Count >= minSupport || !IsAnonymous(s.Label)).ToList();
+            if (fragments.Count == 0 || realSpeakers.Count == 0) return remap;
+
+            foreach (var fragment in fragments)
+            {
+                SessionSpeaker? nearest = null;
+                var bestDistance = double.MaxValue;
+                foreach (var speaker in realSpeakers)
+                {
+                    var d = VectorMath.CosineDistance(fragment.Centroid, speaker.Centroid);
+                    if (d < bestDistance) { bestDistance = d; nearest = speaker; }
+                }
+                if (nearest == null || bestDistance > mergeDistance) continue; // too far from any real speaker: keep it
+
+                nearest.Centroid = VectorMath.WeightedMean(nearest.Centroid, nearest.Count, fragment.Centroid, fragment.Count);
+                nearest.Count += fragment.Count;
+                _session.Remove(fragment);
+                remap[fragment.Label] = nearest.Label;
+            }
+            return remap;
+        }
+    }
+
+    /// <summary>A generic, unnamed session label ("Speaker 1", "Speaker 2", …) as minted by
+    /// <see cref="AssignSession"/>, versus an enrolled person's real name.</summary>
+    private static bool IsAnonymous(string label) =>
+        System.Text.RegularExpressions.Regex.IsMatch(label, @"^Speaker \d+$");
+
     /// <summary>Rename a session speaker (e.g. from a live /assign-name) so future captions in
     /// that voice use <paramref name="newLabel"/>, and return its averaged voiceprint for
     /// enrollment. Null when no current session speaker carries <paramref name="oldLabel"/>.</summary>

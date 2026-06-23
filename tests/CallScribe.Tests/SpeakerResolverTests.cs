@@ -145,6 +145,86 @@ public class SpeakerResolverTests
         resolver.AssignSession([1f, 0f, 0f]);
         Assert.Equal("Speaker 2", resolver.AssignSession([0f, 1f, 0f], clipSeconds: 3.0));
     }
+
+    [Fact]
+    public void Consolidate_FoldsLowSupportFragment_IntoNearestSubstantialSpeaker()
+    {
+        // Tight online threshold mints readily. Two clips of the same voice build a substantial
+        // cluster (Speaker 1, count 2); a single nearby clip is left as a low-support fragment.
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        Assert.Equal("Speaker 1", resolver.AssignSession([1f, 0f, 0f]));
+        Assert.Equal("Speaker 1", resolver.AssignSession([1f, 0f, 0f]));     // same direction: builds support
+        Assert.Equal("Speaker 2", resolver.AssignSession([0.8f, 0.6f, 0f])); // ~0.2 away: a fragment
+
+        var remap = resolver.Consolidate(0.5, minSupport: 2);
+
+        Assert.Equal("Speaker 1", remap["Speaker 2"]); // folded into the substantial speaker
+    }
+
+    [Fact]
+    public void Consolidate_NeverMergesTwoSubstantialSpeakers_EvenWithinDistance()
+    {
+        // The protection that keeps live attribution intact: two real speakers can sit closer than
+        // a person's own fragments, so substantial clusters are never merged into each other.
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]);
+        resolver.AssignSession([1f, 0f, 0f]);          // Speaker 1, count 2
+        resolver.AssignSession([0.8f, 0.6f, 0f]);
+        resolver.AssignSession([0.8f, 0.6f, 0f]);      // Speaker 2, count 2, ~0.2 from Speaker 1
+
+        Assert.Empty(resolver.Consolidate(0.5, minSupport: 2)); // both substantial: left apart
+    }
+
+    [Fact]
+    public void Consolidate_KeepsDistantFragment_WhenNoSubstantialSpeakerIsClose()
+    {
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]);
+        resolver.AssignSession([1f, 0f, 0f]);   // Speaker 1, count 2 (substantial)
+        resolver.AssignSession([0f, 1f, 0f]);   // Speaker 2, count 1, orthogonal (dist 1.0)
+
+        Assert.Empty(resolver.Consolidate(0.5, minSupport: 2)); // fragment too far to fold: kept
+    }
+
+    [Fact]
+    public void Consolidate_FoldsFragment_IntoSubstantialNamedSpeaker()
+    {
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]);
+        resolver.AssignSession([1f, 0f, 0f]);          // Speaker 1, count 2
+        resolver.Rename("Speaker 1", "Alice");
+        resolver.AssignSession([0.8f, 0.6f, 0f]);      // a fragment of that voice
+
+        var remap = resolver.Consolidate(0.5, minSupport: 2);
+
+        Assert.Equal("Alice", remap["Speaker 2"]); // folds into the real speaker, keeping the name
+    }
+
+    [Fact]
+    public void Consolidate_ProtectsNamedSpeaker_FromBeingFoldedAway()
+    {
+        // A correctly named (enrolled) speaker keeps their name even with few clips: only anonymous
+        // "Speaker N" fragments are folded, never a real name (else consolidation could demote it).
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]);
+        resolver.AssignSession([1f, 0f, 0f]);          // Speaker 1, count 2 (substantial)
+        resolver.AssignSession([0.8f, 0.6f, 0f]);      // Speaker 2, count 1
+        resolver.Rename("Speaker 2", "Joe");           // named, but only one clip
+
+        var remap = resolver.Consolidate(0.5, minSupport: 2);
+
+        Assert.False(remap.ContainsKey("Joe")); // never folded away despite low support
+    }
+
+    [Fact]
+    public void Consolidate_NoSubstantialSpeakers_LeavesEverythingAlone()
+    {
+        var resolver = new SpeakerResolver(store: null, sessionMergeDistance: 0.1);
+        resolver.AssignSession([1f, 0f, 0f]); // count 1
+        resolver.AssignSession([0f, 1f, 0f]); // count 1
+
+        Assert.Empty(resolver.Consolidate(0.5, minSupport: 2)); // nothing solid to fold into
+    }
 }
 
 public class SelfVerificationTests
