@@ -4,7 +4,7 @@ using Npgsql;
 using TranscriptReconcile;
 
 // Reconcile a meeting's transcripts to benchmark live (coach DB) and final (.md) against a Teams
-// VTT (reference). Live is pulled straight from the coach hypertable — no file needed.
+// VTT (reference). Live is pulled straight from the coach hypertable (no file needed).
 //
 //   dotnet run --project tools/TranscriptReconcile -- --meeting 2026-06-23-0931 [--teams call.vtt]
 //
@@ -61,7 +61,7 @@ if (teams.Count > 0)
 results.Add(Metrics.Compute("Live vs Final (reference = Final)", final, live));
 
 var sb = new StringBuilder();
-sb.AppendLine($"# Transcript reconciliation — {meeting}").AppendLine();
+sb.AppendLine($"# Transcript reconciliation: {meeting}").AppendLine();
 sb.AppendLine($"Sources: live {live.Count} lines, final {final.Count} lines"
     + (teams.Count > 0 ? $", teams {teams.Count} lines" : ", teams (not provided)")).AppendLine();
 foreach (var r in results) sb.AppendLine(Report.Markdown(r)).AppendLine();
@@ -99,7 +99,7 @@ static async Task<IReadOnlyList<Utterance>> LoadLiveAsync(string connectionStrin
 static IReadOnlyList<Utterance> LoadLiveFile(string path)
 {
     var rows = System.Text.Json.JsonSerializer.Deserialize<List<ReplayLineDto>>(File.ReadAllText(path)) ?? [];
-    return [.. rows.Select(r => new Utterance(r.sec, null, r.speaker, r.text))];
+    return [.. rows.Select(r => new Utterance(r.sec, null, r.speaker ?? "", r.text ?? ""))];
 }
 
-internal sealed record ReplayLineDto(double sec, string speaker, string text);
+internal sealed record ReplayLineDto(double sec, string? speaker, string? text);

@@ -9,10 +9,10 @@ using Whisper.net.Ggml;
 
 // Re-produce the LIVE transcript for a recorded meeting by feeding its saved WAVs back through the
 // real LiveCaptionEngine, under a chosen live model and speaker thresholds. The engine windows by
-// buffered AUDIO duration (not wall-clock), so the chunk boundaries — and thus the transcript — match
+// buffered AUDIO duration (not wall-clock), so the chunk boundaries (and thus the transcript) match
 // a real live run. Lets us A/B live-pipeline changes (model, clustering) against a fixture and
 // reconcile the result with TranscriptReconcile. (Wall-clock timestamps are compressed, so the
-// timing dimension of a replay is not faithful — use it for transcription and speakers.)
+// timing dimension of a replay is not faithful; use it for transcription and speakers.)
 //
 //   dotnet run --project tools/LiveReplay -- --stem 2026-06-23-0931 --live-model small.en [--session-merge 0.7]
 
@@ -22,14 +22,15 @@ for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
-        case "--stem": stem = args[++i]; break;
-        case "--live-model": liveModel = args[++i]; break;
-        case "--session-merge": merge = double.Parse(args[++i]); break;
-        case "--min-speaker-seconds": minSpeaker = double.Parse(args[++i]); break;
-        case "--out": outPath = args[++i]; break;
+        case "--stem": stem = Arg(ref i); break;
+        case "--live-model": liveModel = Arg(ref i); break;
+        case "--session-merge": merge = double.Parse(Arg(ref i)); break;
+        case "--min-speaker-seconds": minSpeaker = double.Parse(Arg(ref i)); break;
+        case "--out": outPath = Arg(ref i); break;
         default: Console.Error.WriteLine($"Unknown argument: {args[i]}"); return 2;
     }
 }
+string Arg(ref int i) => ++i < args.Length ? args[i] : throw new ArgumentException("missing value for option");
 if (stem is null)
 {
     Console.Error.WriteLine("Usage: LiveReplay --stem <stem> [--live-model base.en] [--session-merge d] [--min-speaker-seconds d] [--out file]");
@@ -38,7 +39,7 @@ if (stem is null)
 
 var config = AppConfig.Load();
 if (config.OutputRoot != null) AppPaths.OutputRootOverride = config.OutputRoot;
-liveModel ??= "base.en";
+liveModel ??= config.LiveModel; // match the live default; pass --live-model to A/B another
 if (merge is { } mg) config.SessionMergeDistance = mg;
 if (minSpeaker is { } ms) config.LiveMinSpeakerSeconds = ms;
 

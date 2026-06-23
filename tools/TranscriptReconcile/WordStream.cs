@@ -6,7 +6,7 @@ namespace TranscriptReconcile;
 public readonly record struct Word(string Token, string Speaker, double TimeSec);
 
 /// <summary>One step of a word-level alignment: match/substitution (both set), deletion
-/// (hypothesis null — a reference word the hypothesis missed), or insertion (reference null).</summary>
+/// (hypothesis null, a reference word the hypothesis missed), or insertion (reference null).</summary>
 public readonly record struct WordPair(Word? Reference, Word? Hypothesis);
 
 public static class WordStream

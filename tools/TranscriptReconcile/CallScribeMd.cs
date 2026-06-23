@@ -5,7 +5,7 @@ namespace TranscriptReconcile;
 
 /// <summary>Parse a call-scribe merged transcript (.md as written by TranscriptMerger): YAML
 /// frontmatter, then <c>**Speaker** [HH:mm:ss]</c> blocks each followed by one text line per
-/// segment. This is the FINAL source — it carries the diarized speaker names, which the per-track
+/// segment. This is the FINAL source: it carries the diarized speaker names, which the per-track
 /// JSON does not. Times are seconds from the meeting start (from the "started:" frontmatter);
 /// interior lines of a block share the block's start time (the .md only stamps block starts).</summary>
 public static partial class CallScribeMd
@@ -27,9 +27,11 @@ public static partial class CallScribeMd
                 startSec = StampSeconds(header.Groups["t"].Value, start);
                 continue;
             }
+            // Frontmatter and the title precede the first speaker block, so an empty speaker (no
+            // header seen yet) already skips them; no content-based frontmatter filter is needed
+            // (one would wrongly drop real lines like "yeah: so anyway").
             var text = line.Trim();
             if (text.Length == 0 || text == "---" || text.StartsWith('#') || speaker.Length == 0) continue;
-            if (text.Contains(':') && FrontmatterKey().IsMatch(text)) continue; // stray frontmatter line
             utterances.Add(new Utterance(startSec, null, speaker, text));
         }
         return utterances;
@@ -65,7 +67,4 @@ public static partial class CallScribeMd
 
     [GeneratedRegex(@"^\*\*(?<sp>.+?)\*\*\s*\[(?<t>\d{1,2}:\d{2}:\d{2})\]\s*$")]
     private static partial Regex Header();
-
-    [GeneratedRegex(@"^[a-z]+:\s")]
-    private static partial Regex FrontmatterKey();
 }

@@ -8,8 +8,8 @@ Measured scorecard (word-level, segmentation-independent):
 | Reconciliation | WER | CER | word recall | precision | speakers | word attribution | timing (median / p90) |
 |---|---|---|---|---|---|---|---|
 | Live vs Teams  | 24.1% | 16.6% | 92.0% | 94.5% | 25 → 8 | 97% | 1.2s / 3.6s (offset −13.9s) |
-| Final vs Teams | 19.5% | 14.7% | 93.6% | 94.2% | 8 → 8 | 91% | — |
-| Live vs Final  | 26.0% | 18.1% | 92.6% | 94.6% | 25 → 8 | 94% | — |
+| Final vs Teams | 19.5% | 14.7% | 93.6% | 94.2% | 8 → 8 | 91% | n/a |
+| Live vs Final  | 26.0% | 18.1% | 92.6% | 94.6% | 25 → 8 | 94% | n/a |
 
 Below, only claims that survived adversarial verification against the code are carried; corrections
 from verification are called out.

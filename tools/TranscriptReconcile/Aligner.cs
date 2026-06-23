@@ -38,7 +38,7 @@ public static class Aligner
     /// <summary>Monotonic Needleman–Wunsch alignment. A match scores text similarity minus a mild
     /// penalty for time distance (after applying <paramref name="offsetSeconds"/> to the hypothesis);
     /// unmatched lines become Missing/Spurious. <paramref name="gapScore"/> is the value of leaving a
-    /// line unmatched, so a pair is matched only when its score beats gapping both — roughly when
+    /// line unmatched, so a pair is matched only when its score beats gapping both, roughly when
     /// similarity exceeds 2·gapScore (≈0.5 at the default).</summary>
     public static IReadOnlyList<AlignedPair> Align(
         IReadOnlyList<Utterance> reference, IReadOnlyList<Utterance> hypothesis,

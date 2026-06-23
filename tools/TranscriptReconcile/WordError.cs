@@ -1,7 +1,8 @@
 namespace TranscriptReconcile;
 
 /// <summary>Word/character error rate via token-level edit distance, plus a normalized
-/// similarity used to score alignment. No such helper exists in the app; this is the core.</summary>
+/// similarity used to score alignment. The app's tokenizers (CrossTrackEchoFilter, AdviceFilter)
+/// de-dupe into a set; WER needs ordered tokens with duplicates, so this tool keeps its own.</summary>
 public static class WordError
 {
     /// <summary>Lowercase, strip punctuation, split on whitespace into comparable word tokens.</summary>
@@ -24,10 +25,6 @@ public static class WordError
         /// <summary>Word error rate: edits per reference token. Empty reference => 0 when the
         /// hypothesis is also empty, else 1 (everything is an insertion error).</summary>
         public double Rate => ReferenceLength == 0 ? (Total == 0 ? 0.0 : 1.0) : (double)Total / ReferenceLength;
-
-        public static EditCounts operator +(EditCounts a, EditCounts b) => new(
-            a.Substitutions + b.Substitutions, a.Deletions + b.Deletions,
-            a.Insertions + b.Insertions, a.ReferenceLength + b.ReferenceLength);
     }
 
     /// <summary>Levenshtein over token sequences, classified into substitutions/deletions/

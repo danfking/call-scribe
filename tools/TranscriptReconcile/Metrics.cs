@@ -48,10 +48,10 @@ public static class Metrics
         {
             if (p.Reference is { } r && p.Hypothesis is { } h)
             {
-                if (r.Token != h.Token) sub++;
+                timeErrors.Add(Math.Abs((h.TimeSec - offset) - r.TimeSec));
+                if (r.Token != h.Token) { sub++; continue; } // substitution: don't vote speakers on a mis-pair
                 if (!votes.TryGetValue(h.Speaker, out var d)) votes[h.Speaker] = d = [];
                 d[r.Speaker] = d.GetValueOrDefault(r.Speaker) + 1;
-                timeErrors.Add(Math.Abs((h.TimeSec - offset) - r.TimeSec));
             }
             else if (p.Reference is not null) del++;
             else ins++;
@@ -67,7 +67,7 @@ public static class Metrics
         int correct = 0, mis = 0;
         foreach (var p in pairs)
         {
-            if (p.Reference is not { } r || p.Hypothesis is not { } h) continue;
+            if (p.Reference is not { } r || p.Hypothesis is not { } h || r.Token != h.Token) continue;
             if (map.TryGetValue(h.Speaker, out var to) && to == r.Speaker) correct++;
             else mis++;
         }
