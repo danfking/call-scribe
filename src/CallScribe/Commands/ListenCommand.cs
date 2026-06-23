@@ -20,8 +20,8 @@ public static class ListenCommand
         };
         var liveModelOption = new Option<string>("--live-model")
         {
-            Description = "Small model for live captions: base.en (default), tiny.en, small.en",
-            DefaultValueFactory = _ => "base.en",
+            Description = "Small model for live captions: tiny.en, base.en, small.en. Default from config (liveModel).",
+            DefaultValueFactory = _ => "",
         };
         var secondsOption = new Option<int?>("--seconds")
         {
@@ -81,6 +81,8 @@ public static class ListenCommand
         var config = AppConfig.Load();
         // --speakers turns identification on for this run, including the after-meeting pass.
         if (speakersFlag) config.SpeakerIdEnabled = true;
+        // Empty flag => use the configured live model (default small.en); an explicit flag overrides.
+        if (string.IsNullOrWhiteSpace(liveModel)) liveModel = config.LiveModel;
 
         // Live model is small (~75-466 MB); make sure it's present before capture starts.
         var liveModelPath = await ModelManager.EnsureWhisperModelAsync(
