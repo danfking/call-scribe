@@ -224,12 +224,15 @@ public static class ListenCommand
                 {
                     var live = await coachMemory.GetTranscriptAsync(stem, CancellationToken.None).ConfigureAwait(false);
                     var path = TranscriptMerger.MergeLive(
-                        stem, [.. live.Select(l => (l.At, l.Speaker, l.Text))], AppPaths.TranscriptsDir);
+                        stem, [.. live.Select(l => (l.At, l.Speaker, l.Text))], AppPaths.TranscriptsDir, duration);
                     AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path}");
                     return 0;
                 }
+                // Coach DB unavailable: we cannot save the live transcript. Fall through to the normal
+                // flow below, which runs the batch pass (or honours --no-transcribe) so the message
+                // never promises an artifact that the following lines would skip.
                 AnsiConsole.MarkupLine(
-                    "[yellow]--live-only needs the coach memory DB, which is unavailable; running the batch transcription instead.[/]");
+                    "[yellow]--live-only needs the coach memory DB, which is unavailable; cannot save the live transcript.[/]");
             }
 
             if (noTranscribe) return 0;

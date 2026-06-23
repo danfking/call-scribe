@@ -65,22 +65,26 @@ public static class TranscriptMerger
     /// A <c>source: live</c> frontmatter line marks it as the lower-latency, slightly-lower-accuracy
     /// transcript rather than the full-quality final one. Each line already knows its wall-clock time
     /// and speaker, so this just groups consecutive same-speaker lines under a stamped header.</summary>
+    /// <param name="duration">The recorded meeting length for the frontmatter. When null it is
+    /// approximated by the span between the first and last caption, which omits leading/trailing
+    /// silence; pass the real capture duration when it is known (the listen flow has it).</param>
     public static string MergeLive(
-        string stem, IReadOnlyList<(DateTime At, string Speaker, string Text)> lines, string outputDir)
+        string stem, IReadOnlyList<(DateTime At, string Speaker, string Text)> lines, string outputDir,
+        TimeSpan? duration = null)
     {
         Directory.CreateDirectory(outputDir);
 
         var ordered = lines.OrderBy(l => l.At).ToList();
         var start = ParseStart(stem);
-        var duration = ordered.Count > 0
+        var elapsed = duration ?? (ordered.Count > 0
             ? TimeSpan.FromSeconds(Math.Max(0, (ordered[^1].At - ordered[0].At).TotalSeconds))
-            : TimeSpan.Zero;
+            : TimeSpan.Zero);
 
         var sb = new StringBuilder();
         sb.AppendLine("---");
         sb.AppendLine($"started: {(start is { } s0 ? s0.ToString("yyyy-MM-dd HH:mm") : stem.Length >= 10 ? stem[..10] : stem)}");
         sb.AppendLine($"label: {(stem.Length > 16 ? stem[16..] : "")}");
-        sb.AppendLine($"duration: {FormatElapsed(duration)}");
+        sb.AppendLine($"duration: {FormatElapsed(elapsed)}");
         sb.AppendLine($"generated: {DateTime.Now:yyyy-MM-dd}");
         sb.AppendLine("source: live"); // distinguishes from the full-quality batch ("final") transcript
         sb.AppendLine("---");
