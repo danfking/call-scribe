@@ -20,6 +20,12 @@ public sealed class AppConfig
     [JsonPropertyName("model")]
     public string Model { get; set; } = "large-v3-turbo";
 
+    /// <summary>Small model for live captions during recording (tiny.en/base.en/small.en).
+    /// small.en is the default: benchmarking showed it cuts live word-error materially over
+    /// base.en for a little extra latency. Override per-run with <c>listen --live-model</c>.</summary>
+    [JsonPropertyName("liveModel")]
+    public string LiveModel { get; set; } = "small.en";
+
     [JsonPropertyName("language")]
     public string Language { get; set; } = "en";
 
@@ -117,7 +123,7 @@ public sealed class AppConfig
     /// raise it if one person fragments into several speakers live, lower it if distinct people
     /// get merged.</summary>
     [JsonPropertyName("sessionMergeDistance")]
-    public double SessionMergeDistance { get; set; } = 0.55;
+    public double SessionMergeDistance { get; set; } = 0.70;
 
     /// <summary>A live far-side caption shorter than this many seconds is too brief to embed
     /// reliably, so it attaches to the nearest existing session speaker rather than minting a new

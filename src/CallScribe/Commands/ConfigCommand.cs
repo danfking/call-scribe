@@ -12,7 +12,7 @@ public static class ConfigCommand
 
         var keyArgument = new Argument<string>("key")
         {
-            Description = "micDevice | loopbackDevice | model | language | outputRoot | keepAudio | "
+            Description = "micDevice | loopbackDevice | model | liveModel | language | outputRoot | keepAudio | "
                           + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
                           + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
                           + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
@@ -45,6 +45,7 @@ public static class ConfigCommand
         table.AddRow("micDevice", config.MicDevice ?? "[grey](default)[/]", "default communications mic");
         table.AddRow("loopbackDevice", config.LoopbackDevice ?? "[grey](default)[/]", "default communications output");
         table.AddRow("model", config.Model, "large-v3-turbo");
+        table.AddRow("liveModel", config.LiveModel, "small.en");
         table.AddRow("language", config.Language, "en");
         table.AddRow("outputRoot", config.OutputRoot ?? "[grey](default)[/]", AppPaths.OutputRoot.EscapeMarkup());
         table.AddRow("keepAudio", config.KeepAudio.ToString().ToLowerInvariant(), "true");
@@ -66,7 +67,7 @@ public static class ConfigCommand
         table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
         table.AddRow("diarizationClusterThreshold", config.DiarizationClusterThreshold.ToString("0.##"), "0.75");
         table.AddRow("diarizationMinClusterSeconds", config.DiarizationMinClusterSeconds.ToString("0.##"), "8");
-        table.AddRow("sessionMergeDistance", config.SessionMergeDistance.ToString("0.##"), "0.55");
+        table.AddRow("sessionMergeDistance", config.SessionMergeDistance.ToString("0.##"), "0.7");
         table.AddRow("liveMinSpeakerSeconds", config.LiveMinSpeakerSeconds.ToString("0.##"), "1.5");
 
         AnsiConsole.Write(table);
@@ -90,6 +91,10 @@ public static class ConfigCommand
             case "model":
                 if (!cleared) Transcription.ModelManager.ParseModel(value); // validate
                 config.Model = cleared ? "large-v3-turbo" : value;
+                break;
+            case "livemodel":
+                if (!cleared) Transcription.ModelManager.ParseModel(value); // validate
+                config.LiveModel = cleared ? "small.en" : value;
                 break;
             case "language":
                 config.Language = cleared ? "en" : value;
@@ -157,7 +162,7 @@ public static class ConfigCommand
                 config.DiarizationMinClusterSeconds = cleared ? 8.0 : double.Parse(value);
                 break;
             case "sessionmergedistance":
-                config.SessionMergeDistance = cleared ? 0.55 : double.Parse(value);
+                config.SessionMergeDistance = cleared ? 0.70 : double.Parse(value);
                 break;
             case "liveminspeakerseconds":
                 config.LiveMinSpeakerSeconds = cleared ? 1.5 : double.Parse(value);
