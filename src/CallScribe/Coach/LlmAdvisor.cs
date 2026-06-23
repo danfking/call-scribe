@@ -33,7 +33,7 @@ public sealed class LlmAdvisor : IAdvisor
         stay silent (advise=false) or suggest they check their notes. Never name a
         specific from your own background knowledge.
 
-        Your advice must be a complete, self-contained statement that stands on its own — never a
+        Your advice must be a complete, self-contained statement that stands on its own: never a
         bare number, a single word, or a fragment copied from the transcript. A reader who cannot
         see the transcript must still understand it.
 
@@ -140,7 +140,7 @@ public sealed class LlmAdvisor : IAdvisor
         if (recentAdvice.Count > 0)
         {
             sb.AppendLine("You have ALREADY given this advice in this meeting. Do NOT repeat or rephrase any");
-            sb.AppendLine("of it — only advise if you have something genuinely new to add:");
+            sb.AppendLine("of it; only advise if you have something genuinely new to add:");
             foreach (var advice in recentAdvice)
             {
                 sb.Append("- ").AppendLine(advice);
