@@ -31,6 +31,12 @@ public static class ListenCommand
         {
             Description = "Skip the full-quality transcription after stopping",
         };
+        var liveOnlyOption = new Option<bool>("--live-only")
+        {
+            Description = "Skip the slow batch transcription and save the live transcript instead "
+                          + "(faster; slightly lower accuracy). Best with --speakers so the live "
+                          + "speaker labels are consolidated first. Needs the coach memory DB.",
+        };
         var aecOption = new Option<bool>("--aec")
         {
             Description = "Cancel far-side speaker bleed from the mic with the Windows Voice Capture DSP "
@@ -59,6 +65,7 @@ public static class ListenCommand
         command.Options.Add(liveModelOption);
         command.Options.Add(secondsOption);
         command.Options.Add(noTranscribeOption);
+        command.Options.Add(liveOnlyOption);
         command.Options.Add(aecOption);
         command.Options.Add(aesOption);
         command.Options.Add(coachOption);
@@ -68,6 +75,7 @@ public static class ListenCommand
             parseResult.GetValue(liveModelOption)!,
             parseResult.GetValue(secondsOption),
             parseResult.GetValue(noTranscribeOption),
+            parseResult.GetValue(liveOnlyOption),
             parseResult.GetValue(aecOption),
             parseResult.GetValue(aesOption),
             parseResult.GetValue(coachOption),
@@ -76,7 +84,7 @@ public static class ListenCommand
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool aec, int aes, bool coachFlag, bool speakersFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool liveOnly, bool aec, int aes, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
         var config = AppConfig.Load();
         // --speakers turns identification on for this run, including the after-meeting pass.
@@ -99,30 +107,37 @@ public static class ListenCommand
         SpeakerIdentity? speakerId = null;
         try
         {
-            // The coach watches the same caption stream the dashboard renders. Opt-in via
-            // --coach or config; the stub advisor needs no models, so this works offline.
-            if (coachFlag || config.CoachEnabled)
+            // The coach watches the same caption stream the dashboard renders. Opt-in via --coach
+            // or config; the stub advisor needs no models, so this works offline. --live-only also
+            // needs the coach's transcript store (that is where the live transcript is persisted for
+            // the stop-time export), but not the advice panel, so it runs the coach with a stub
+            // advisor (no Ollama, no panel) purely to persist segments.
+            var wantCoachPanel = coachFlag || config.CoachEnabled;
+            if (wantCoachPanel || liveOnly)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: false, coachMemory);
-                captions.EnableAdvicePanel();
+                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory);
                 coach = new CoachEngine(advisor, coachMemory, stem);
-                coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
-                // One place maps a coach activity to its panel presentation; seed the resting
-                // state so the panel shows "Listening" before the first utterance.
-                static (string Text, string Colour) Present(CoachActivity activity) => activity switch
+                if (wantCoachPanel)
                 {
-                    CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
-                    CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
-                    _ => ("○ Listening", "grey"),
-                };
-                coach.ActivityChanged += activity =>
-                {
-                    var (text, colour) = Present(activity);
-                    captions.SetCoachActivity(text, colour);
-                };
-                var (restText, restColour) = Present(CoachActivity.Listening);
-                captions.SetCoachActivity(restText, restColour);
+                    captions.EnableAdvicePanel();
+                    coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+                    // One place maps a coach activity to its panel presentation; seed the resting
+                    // state so the panel shows "Listening" before the first utterance.
+                    static (string Text, string Colour) Present(CoachActivity activity) => activity switch
+                    {
+                        CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
+                        CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
+                        _ => ("○ Listening", "grey"),
+                    };
+                    coach.ActivityChanged += activity =>
+                    {
+                        var (text, colour) = Present(activity);
+                        captions.SetCoachActivity(text, colour);
+                    };
+                    var (restText, restColour) = Present(CoachActivity.Listening);
+                    captions.SetCoachActivity(restText, restColour);
+                }
                 captions.CaptionEmitted += coach.Observe;
             }
 
@@ -183,11 +198,12 @@ public static class ListenCommand
                 }
                 catch { /* best-effort: the live labels simply stay as they were */ }
             }
-            if (coachMemory != null)
+            if (coachMemory != null && wantCoachPanel)
             {
                 // Consolidate the meeting into durable memories for future recall. Run it on a
                 // fresh token, not the session ct: a stop (Enter/Ctrl-C) cancels ct, and the
-                // end-of-meeting write is exactly the work that should survive the stop.
+                // end-of-meeting write is exactly the work that should survive the stop. Skipped on a
+                // bare --live-only run, which wants speed and no Ollama dependency.
                 try
                 {
                     var consolidator = new MeetingConsolidator(
@@ -198,6 +214,26 @@ public static class ListenCommand
                 catch { /* consolidation is best-effort; never block the transcript */ }
             }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
+
+            // Live-only: skip the slow batch transcription and save the live transcript (already
+            // consolidated above) as the .md artifact instead. Falls back to the batch pass if the
+            // coach DB that holds the live transcript is unavailable.
+            if (liveOnly)
+            {
+                if (coachMemory != null)
+                {
+                    var live = await coachMemory.GetTranscriptAsync(stem, CancellationToken.None).ConfigureAwait(false);
+                    var path = TranscriptMerger.MergeLive(
+                        stem, [.. live.Select(l => (l.At, l.Speaker, l.Text))], AppPaths.TranscriptsDir, duration);
+                    AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path}");
+                    return 0;
+                }
+                // Coach DB unavailable: we cannot save the live transcript. Fall through to the normal
+                // flow below, which runs the batch pass (or honours --no-transcribe) so the message
+                // never promises an artifact that the following lines would skip.
+                AnsiConsole.MarkupLine(
+                    "[yellow]--live-only needs the coach memory DB, which is unavailable; cannot save the live transcript.[/]");
+            }
 
             if (noTranscribe) return 0;
 

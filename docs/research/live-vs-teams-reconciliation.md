@@ -19,6 +19,18 @@ from verification are called out.
 **Yes, live can replace final for this use case, but only after two changes ship: a larger live
 model and live speaker consolidation.** Everything else is polish or measurement hygiene.
 
+> **Update (2026-06-23, both blockers shipped).** Item 1 (`small.en` default, #34) and Item 2 (live
+> speaker consolidation, #35) are in. Re-measured on `0931`: content is unchanged in shape (live
+> ~22-24% WER vs final 19.5%, recall 92% vs 94%, live attribution 98% ≥ final 93%); the speaker
+> blocker is resolved, consolidation folds **24 far-side labels → 8** at **96% attribution held**,
+> matching final's 8. So live now clears the bar the verdict set. The remaining gap is **not** a
+> metrics one, it is a product gap: the saved `.md` artifact is still produced only by the final
+> pass, and the live transcript lives in the coach DB (needs `--coach`). To actually drop/skip final
+> in practice, the consolidated live transcript must be exportable to the saved `.md` (and offline
+> diarization's speaker-enrollment side effect would be lost). Recommendation: make final **optional**
+> (a fast `--live-only` path that exports the live transcript), not removed, so users who want the
+> extra ~3-5 WER points and authoritative diarization can still opt in.
+
 Live trails final by only ~5 WER points (24.1% vs 19.5%) with near-equal recall (92.0% vs 93.6%),
 and live's word-attribution (97%) is actually *higher* than final's (91%). Live timing is already
 good. So the live transcript's *content* is close to final quality. The live *speaker layer* is not:
