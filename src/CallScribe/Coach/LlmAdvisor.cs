@@ -33,6 +33,10 @@ public sealed class LlmAdvisor : IAdvisor
         stay silent (advise=false) or suggest they check their notes. Never name a
         specific from your own background knowledge.
 
+        Your advice must be a complete, self-contained statement that stands on its own: never a
+        bare number, a single word, or a fragment copied from the transcript. A reader who cannot
+        see the transcript must still understand it.
+
         Respond with ONLY a JSON object:
         {"advise": true|false, "kind": "tip"|"answer"|"warning", "advice": "<=25 words"}
         If nothing is worth saying, return {"advise": false, "kind": "tip", "advice": ""}.
@@ -54,10 +58,11 @@ public sealed class LlmAdvisor : IAdvisor
     }
 
     public async Task<AdviceEvent?> ConsiderAsync(
-        IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct)
+        IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+        IReadOnlyList<string> recentAdvice, CancellationToken ct)
     {
         var recalled = await RecallAsync(latest, ct).ConfigureAwait(false);
-        var prompt = BuildPrompt(context, recalled);
+        var prompt = BuildPrompt(context, recalled, recentAdvice);
         // A single short JSON advice object; 300 tokens is ample and keeps latency low.
         var raw = await _chat.CompleteAsync(_model, SystemPrompt, prompt, jsonMode: true, maxTokens: 300, ct)
             .ConfigureAwait(false);
@@ -77,13 +82,26 @@ public sealed class LlmAdvisor : IAdvisor
             return null;
         }
 
+        // Guard against degenerate output: the model sometimes echoes a transcript fragment like
+        // "72", which is meaningless on its own. Require a few words with real letters.
+        var advice = decision.Advice.Trim();
+        if (!IsSelfContained(advice)) return null;
+
         var kind = decision.Kind?.ToLowerInvariant() switch
         {
             "answer" => AdviceKind.Answer,
             "warning" => AdviceKind.Warning,
             _ => AdviceKind.Tip,
         };
-        return new AdviceEvent(DateTime.Now, kind, decision.Advice.Trim(), _model);
+        return new AdviceEvent(DateTime.Now, kind, advice, _model);
+    }
+
+    /// <summary>Advice is worth showing only if it reads as a statement on its own: at least a
+    /// couple of words and some real letters. Drops degenerate model output like a bare "72".</summary>
+    private static bool IsSelfContained(string advice)
+    {
+        var words = advice.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length >= 2 && advice.Any(char.IsLetter);
     }
 
     /// <summary>Semantic recall over past-meeting memories, keyed on the latest line (a
@@ -104,7 +122,8 @@ public sealed class LlmAdvisor : IAdvisor
         }
     }
 
-    private static string BuildPrompt(IReadOnlyList<CaptionEvent> context, IReadOnlyList<RecalledMemory> recalled)
+    private static string BuildPrompt(
+        IReadOnlyList<CaptionEvent> context, IReadOnlyList<RecalledMemory> recalled, IReadOnlyList<string> recentAdvice)
     {
         var sb = new StringBuilder();
         if (recalled.Count > 0)
@@ -118,13 +137,26 @@ public sealed class LlmAdvisor : IAdvisor
             sb.AppendLine();
         }
 
+        if (recentAdvice.Count > 0)
+        {
+            sb.AppendLine("You have ALREADY given this advice in this meeting. Do NOT repeat or rephrase any");
+            sb.AppendLine("of it; only advise if you have something genuinely new to add:");
+            foreach (var advice in recentAdvice)
+            {
+                sb.Append("- ").AppendLine(advice);
+            }
+            sb.AppendLine();
+        }
+
         var start = Math.Max(0, context.Count - ContextLines);
         sb.AppendLine("Recent transcript:");
         for (var i = start; i < context.Count; i++)
         {
             sb.Append(context[i].SpeakerName).Append(": ").AppendLine(context[i].Caption);
         }
-        sb.AppendLine().Append("Should you advise \"Me\" now? Reply with the JSON object only.");
+        sb.AppendLine().Append(
+            "Based on the LATEST line, should you advise \"Me\" now (something new, not already said "
+            + "above)? Reply with the JSON object only.");
         return sb.ToString();
     }
 

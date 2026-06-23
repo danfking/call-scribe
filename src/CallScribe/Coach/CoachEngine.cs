@@ -32,14 +32,21 @@ public enum CoachActivity
 public sealed class CoachEngine : IDisposable
 {
     private const int ContextWindow = 50;
+    // How many recent pieces of advice to feed back to the advisor as "already said, don't repeat".
+    private const int RecentAdviceWindow = 15;
 
     private readonly IAdvisor _advisor;
     private readonly IMemoryStore? _memory;
     private readonly string _meetingId;
-    private readonly AdviceFilter _adviceFilter = new();
+    // Suppress repeated advice for the whole meeting, not just a short window: re-defining a term
+    // discussed minutes ago (because it lingers in the context window) was the failure mode.
+    private readonly AdviceFilter _adviceFilter = new(retentionWindow: TimeSpan.FromHours(8));
     private readonly Channel<CaptionEvent> _inbox =
         Channel.CreateUnbounded<CaptionEvent>(new UnboundedChannelOptions { SingleReader = true });
     private readonly List<CaptionEvent> _context = [];
+    // Advice already shown this meeting (loop-task only, like _context), fed to the advisor so it
+    // won't repeat or rephrase a point it has already made.
+    private readonly List<string> _recentAdvice = [];
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
 
@@ -93,10 +100,15 @@ public sealed class CoachEngine : IDisposable
 
             try
             {
-                var advice = await _advisor.ConsiderAsync(_context, caption, _cts.Token).ConfigureAwait(false);
+                var advice = await _advisor.ConsiderAsync(_context, caption, _recentAdvice, _cts.Token).ConfigureAwait(false);
                 if (advice is { } a && _adviceFilter.ShouldEmit(a.Text, DateTime.Now))
                 {
                     AdviceEmitted?.Invoke(a);
+                    _recentAdvice.Add(a.Text);
+                    if (_recentAdvice.Count > RecentAdviceWindow)
+                    {
+                        _recentAdvice.RemoveRange(0, _recentAdvice.Count - RecentAdviceWindow);
+                    }
                     ActivityChanged?.Invoke(CoachActivity.Listening); // advised; the line is the signal
                 }
                 else

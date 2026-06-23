@@ -12,11 +12,14 @@ public class CoachEngineTests
     private sealed class RecordingAdvisor : IAdvisor
     {
         public readonly List<string> Seen = [];
+        public readonly List<IReadOnlyList<string>> RecentAdviceSeen = [];
 
         public Task<AdviceEvent?> ConsiderAsync(
-            IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct)
+            IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+            IReadOnlyList<string> recentAdvice, CancellationToken ct)
         {
             Seen.Add(latest.Caption);
+            RecentAdviceSeen.Add([.. recentAdvice]); // snapshot: the engine mutates its list
             AdviceEvent? advice = new AdviceEvent(latest.At, AdviceKind.Tip, $"saw: {latest.Caption}", "test");
             return Task.FromResult(advice);
         }
@@ -38,11 +41,28 @@ public class CoachEngineTests
         Assert.Equal(["saw: first", "saw: second"], emitted.Select(a => a.Text));
     }
 
+    [Fact]
+    public async Task Advisor_ReceivesPriorAdvice_SoItCanAvoidRepeating()
+    {
+        // The fix for the coach re-defining a covered term: each call gets the advice already
+        // shown this meeting. First call sees none; the second sees the first call's advice.
+        var advisor = new RecordingAdvisor();
+        using var coach = new CoachEngine(advisor);
+
+        coach.Observe(new CaptionEvent(T0, LiveCaptionEngine.OthersLabel, "first"));
+        coach.Observe(new CaptionEvent(T0.AddSeconds(2), LiveCaptionEngine.OthersLabel, "second"));
+        await coach.CompleteAsync();
+
+        Assert.Empty(advisor.RecentAdviceSeen[0]);
+        Assert.Equal(["saw: first"], advisor.RecentAdviceSeen[1]);
+    }
+
     /// <summary>Always returns the same advice text, to exercise de-duplication.</summary>
     private sealed class FixedAdvisor(string text) : IAdvisor
     {
         public Task<AdviceEvent?> ConsiderAsync(
-            IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct) =>
+            IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+            IReadOnlyList<string> recentAdvice, CancellationToken ct) =>
             Task.FromResult<AdviceEvent?>(new AdviceEvent(DateTime.Now, AdviceKind.Tip, text, "test"));
     }
 
@@ -65,7 +85,8 @@ public class CoachEngineTests
     private sealed class SilentAdvisor : IAdvisor
     {
         public Task<AdviceEvent?> ConsiderAsync(
-            IReadOnlyList<CaptionEvent> context, CaptionEvent latest, CancellationToken ct) =>
+            IReadOnlyList<CaptionEvent> context, CaptionEvent latest,
+            IReadOnlyList<string> recentAdvice, CancellationToken ct) =>
             Task.FromResult<AdviceEvent?>(null);
     }
 
