@@ -12,7 +12,7 @@ using TranscriptReconcile;
 // --teams <vtt> Teams reference (optional; without it, only live-vs-final runs)
 // --out <path>  report path (default: transcripts/<meeting>.reconcile.md)
 
-string? meeting = null, teamsPath = null, mdPath = null, outPath = null;
+string? meeting = null, teamsPath = null, mdPath = null, outPath = null, liveFile = null;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -21,6 +21,7 @@ for (var i = 0; i < args.Length; i++)
         case "--teams": teamsPath = Arg(ref i); break;
         case "--md": mdPath = Arg(ref i); break;
         case "--out": outPath = Arg(ref i); break;
+        case "--live-file": liveFile = Arg(ref i); break;
         default: Console.Error.WriteLine($"Unknown argument: {args[i]}"); return 2;
     }
 }
@@ -37,8 +38,8 @@ if (config.OutputRoot != null) AppPaths.OutputRootOverride = config.OutputRoot;
 mdPath ??= Path.Combine(AppPaths.TranscriptsDir, meeting + ".md");
 outPath ??= Path.Combine(AppPaths.TranscriptsDir, meeting + ".reconcile.md");
 
-var live = await LoadLiveAsync(config.PostgresConn, meeting);
-Console.WriteLine($"live (coach DB): {live.Count} lines");
+var live = liveFile is not null ? LoadLiveFile(liveFile) : await LoadLiveAsync(config.PostgresConn, meeting);
+Console.WriteLine($"live: {live.Count} lines  [{liveFile ?? "coach DB"}]");
 
 var final = File.Exists(mdPath) ? CallScribeMd.Parse(File.ReadAllText(mdPath)) : [];
 Console.WriteLine($"final (.md): {final.Count} lines  [{mdPath}]");
@@ -93,3 +94,12 @@ static async Task<IReadOnlyList<Utterance>> LoadLiveAsync(string connectionStrin
     var t0 = rows[0].At;
     return [.. rows.Select(r => new Utterance((r.At - t0).TotalSeconds, null, r.Speaker, r.Text))];
 }
+
+// Load a replayed live transcript (LiveReplay JSON: [{sec, speaker, text}]).
+static IReadOnlyList<Utterance> LoadLiveFile(string path)
+{
+    var rows = System.Text.Json.JsonSerializer.Deserialize<List<ReplayLineDto>>(File.ReadAllText(path)) ?? [];
+    return [.. rows.Select(r => new Utterance(r.sec, null, r.speaker, r.text))];
+}
+
+internal sealed record ReplayLineDto(double sec, string speaker, string text);
