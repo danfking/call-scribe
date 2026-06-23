@@ -59,6 +59,53 @@ public static class TranscriptMerger
         return outputPath;
     }
 
+    /// <summary>Write the live transcript (the per-chunk captions persisted to the coach DB during
+    /// the meeting, already carrying resolved/consolidated speaker names) as a .md in the SAME format
+    /// as <see cref="Merge"/>, so the live-only path produces the same artifact the batch pass would.
+    /// A <c>source: live</c> frontmatter line marks it as the lower-latency, slightly-lower-accuracy
+    /// transcript rather than the full-quality final one. Each line already knows its wall-clock time
+    /// and speaker, so this just groups consecutive same-speaker lines under a stamped header.</summary>
+    public static string MergeLive(
+        string stem, IReadOnlyList<(DateTime At, string Speaker, string Text)> lines, string outputDir)
+    {
+        Directory.CreateDirectory(outputDir);
+
+        var ordered = lines.OrderBy(l => l.At).ToList();
+        var start = ParseStart(stem);
+        var duration = ordered.Count > 0
+            ? TimeSpan.FromSeconds(Math.Max(0, (ordered[^1].At - ordered[0].At).TotalSeconds))
+            : TimeSpan.Zero;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("---");
+        sb.AppendLine($"started: {(start is { } s0 ? s0.ToString("yyyy-MM-dd HH:mm") : stem.Length >= 10 ? stem[..10] : stem)}");
+        sb.AppendLine($"label: {(stem.Length > 16 ? stem[16..] : "")}");
+        sb.AppendLine($"duration: {FormatElapsed(duration)}");
+        sb.AppendLine($"generated: {DateTime.Now:yyyy-MM-dd}");
+        sb.AppendLine("source: live"); // distinguishes from the full-quality batch ("final") transcript
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine($"# Call transcript: {stem}");
+        sb.AppendLine();
+
+        string? currentSpeaker = null;
+        foreach (var line in ordered)
+        {
+            if (string.IsNullOrWhiteSpace(line.Text)) continue;
+            if (line.Speaker != currentSpeaker)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"**{line.Speaker}** [{line.At.ToLocalTime():HH:mm:ss}]");
+                currentSpeaker = line.Speaker;
+            }
+            sb.AppendLine(line.Text);
+        }
+
+        var outputPath = Path.Combine(outputDir, $"{stem}.md");
+        File.WriteAllText(outputPath, sb.ToString());
+        return outputPath;
+    }
+
     /// <summary>Recording stems start with yyyy-MM-dd-HHmm, written at call start.</summary>
     private static DateTime? ParseStart(string stem) =>
         stem.Length >= 15 && DateTime.TryParseExact(

@@ -40,6 +40,35 @@ public class TranscriptMergerTests
     }
 
     [Fact]
+    public void MergeLive_WritesFinalFormat_GroupingConsecutiveSpeakers()
+    {
+        var t0 = new DateTime(2026, 6, 11, 15, 0, 0, DateTimeKind.Local);
+        var lines = new List<(DateTime At, string Speaker, string Text)>
+        {
+            (t0, "Me", "Morning everyone."),
+            (t0.AddSeconds(5), "Kiel", "Quick update from me."),
+            (t0.AddSeconds(9), "Kiel", "Shipped the fix yesterday."), // consecutive: shares the header
+            (t0.AddSeconds(15), "Me", "Thanks Kiel."),
+        };
+
+        var path = TranscriptMerger.MergeLive("2026-06-11-1500-standup", lines, TempDir);
+        var content = File.ReadAllText(path);
+
+        Assert.Contains("source: live", content);              // marked as the live transcript
+        Assert.Contains("started: 2026-06-11 15:00", content);
+        Assert.Contains("label: standup", content);
+        Assert.Contains("**Me** [15:00:00]", content);
+        Assert.Contains("**Kiel** [15:00:05]", content);
+        Assert.Equal(1, content.Split("**Kiel**").Length - 1); // two consecutive Kiel lines, one header
+        Assert.Equal(2, content.Split("**Me**").Length - 1);   // Me opens and resumes after Kiel
+
+        var firstKiel = content.IndexOf("Quick update");
+        var secondKiel = content.IndexOf("Shipped the fix");
+        var backToMe = content.IndexOf("Thanks Kiel");
+        Assert.True(firstKiel < secondKiel && secondKiel < backToMe);
+    }
+
+    [Fact]
     public void Merge_FallsBackToElapsedTimestampsForNonStandardStem()
     {
         var others = new TrackTranscript("Others", 10, [new TranscriptSegment(2.0, 4.0, "Test.")]);
