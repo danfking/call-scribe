@@ -38,10 +38,19 @@ public sealed class LiveStatusDisplay : IDisposable
     private readonly IReadOnlyList<SlashCommandSpec> _commands;
     private int _selectedCandidate;
 
+    // The /ask answer overlay: null = none shown; Answer == null = the model call is in flight
+    // ("Thinking…"). While shown, Esc dismisses it instead of ending the session.
+    private AskState? _answer;
+
     /// <summary>Invoked when the user runs <c>/assign-name "label" "name"</c>: rename the
     /// speaker and persist the voiceprint. Returns false when no current speaker carries that
     /// label. Set by ListenCommand; null means name assignment is unavailable (speaker-id off).</summary>
     public Func<string, string, CancellationToken, Task<bool>>? OnAssignName { get; set; }
+
+    /// <summary>Invoked when the user runs <c>/ask &lt;question&gt;</c>: answer a question about the
+    /// live transcript. Args are (question, recent transcript text, ct) and the result is the answer
+    /// to show in the overlay. Set by ListenCommand; null means Q&amp;A is unavailable this session.</summary>
+    public Func<string, string, CancellationToken, Task<string>>? OnAsk { get; set; }
 
     // Keep memory bounded; only the tail that fits the window is ever rendered.
     private const int MaxCaptions = 500;
@@ -63,6 +72,7 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
+    private readonly record struct AskState(string Question, string? Answer);
 
     public LiveStatusDisplay()
     {
@@ -72,6 +82,7 @@ public sealed class LiveStatusDisplay : IDisposable
         _commands =
         [
             new("/assign-name", "\"<label>\" \"<name>\"", true, HandleAssign, ["/rename"]),
+            new("/ask", "<question about the transcript>", false, HandleAsk, []),
             new("/speakers", "list far-side speakers", false, _ => ShowSpeakers(), []),
             new("/help", "show commands", false, _ => ShowHelp(), []),
             new("/stop", "finish the session", false, _ => RequestStop(), []),
@@ -242,7 +253,8 @@ public sealed class LiveStatusDisplay : IDisposable
                 Submit();
                 break;
             case ConsoleKey.Escape:
-                RequestStop();
+                // Esc dismisses an open answer overlay first; only ends the session when none is shown.
+                if (!DismissAnswer()) RequestStop();
                 break;
             case ConsoleKey.UpArrow:
                 MoveCandidate(-1);
@@ -315,6 +327,72 @@ public sealed class LiveStatusDisplay : IDisposable
     }
 
     private void ShowHelp() => SetHint(SlashCommand.Help(_commands));
+
+    /// <summary>Answer a question about the live transcript: show a "thinking" overlay, run the
+    /// model call off the render thread, then fill in the answer (unless the overlay was dismissed or
+    /// a newer question replaced it). The transcript context is built here so the display owns the
+    /// captions; ListenCommand's callback just runs the model.</summary>
+    private void HandleAsk(string[] args)
+    {
+        var question = string.Join(" ", args).Trim();
+        if (question.Length == 0)
+        {
+            SetHint("Usage: /ask <question about the transcript>");
+            return;
+        }
+
+        var callback = OnAsk;
+        if (callback == null)
+        {
+            SetHint("Q&A is unavailable this session.");
+            return;
+        }
+
+        var transcript = RecentTranscriptText();
+        lock (_lock) _answer = new AskState(question, null); // null answer => thinking
+        _dirty = true;
+
+        _ = Task.Run(async () =>
+        {
+            string answer;
+            try { answer = await callback(question, transcript, CancellationToken.None).ConfigureAwait(false); }
+            catch { answer = "Sorry, that question could not be answered (the model call failed)."; }
+
+            lock (_lock)
+            {
+                // Only fill in if this question's overlay is still the one showing (not dismissed,
+                // not superseded by a newer /ask).
+                if (_answer is { } a && a.Question == question && a.Answer == null)
+                {
+                    _answer = a with { Answer = answer };
+                }
+            }
+            _dirty = true;
+        });
+    }
+
+    /// <summary>Dismiss the answer overlay if one is shown; returns whether there was one.</summary>
+    private bool DismissAnswer()
+    {
+        lock (_lock)
+        {
+            if (_answer == null) return false;
+            _answer = null;
+        }
+        _dirty = true;
+        return true;
+    }
+
+    /// <summary>Recent transcript text (speaker: line) for the Q&A context.</summary>
+    private string RecentTranscriptText()
+    {
+        const int maxLines = 40;
+        lock (_lock)
+        {
+            var start = Math.Max(0, _captions.Count - maxLines);
+            return string.Join("\n", _captions.Skip(start).Select(c => $"{c.Label}: {c.Text}"));
+        }
+    }
 
     private void HandleAssign(string[] args)
     {
@@ -434,7 +512,13 @@ public sealed class LiveStatusDisplay : IDisposable
             var footer = new Rows(inputLine, secondRow);
 
             IRenderable body = transcript;
-            if (_showAdvice)
+            if (_answer is { } ask)
+            {
+                // An /ask answer overlay takes the slot below the transcript (over the coach) until
+                // dismissed with Esc, so the layout stays stable.
+                body = new Rows(transcript, BuildAnswerPanel(ask));
+            }
+            else if (_showAdvice)
             {
                 // Activity line, a blank separator, then the advice log — spacing via Rows only.
                 var advice = new Panel(new Rows(BuildCoachActivity(), new Markup(""), BuildAdvice()))
@@ -449,6 +533,26 @@ public sealed class LiveStatusDisplay : IDisposable
 
             return new Rows(header, cards, body, footer);
         }
+    }
+
+    /// <summary>The /ask answer overlay panel: the question, then the answer (or "Thinking…" while
+    /// the model runs), with an Esc-to-dismiss hint. Coach-coloured so it reads as assistant output.</summary>
+    private IRenderable BuildAnswerPanel(AskState ask)
+    {
+        var answer = ask.Answer is { } text
+            ? new Markup($"[white]{text.EscapeMarkup()}[/]")
+            : new Markup("[grey]Thinking…[/]");
+        var content = new Rows(
+            new Markup($"[grey]Q:[/] {ask.Question.EscapeMarkup()}"),
+            new Markup(""),
+            answer,
+            new Markup(""),
+            new Markup("[grey]Esc to dismiss[/]"));
+        return new Panel(content)
+            .Header("[cyan] ask [/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Cyan1)
+            .Expand();
     }
 
     private IRenderable BuildCard((string Label, string Colour) track)
@@ -496,7 +600,7 @@ public sealed class LiveStatusDisplay : IDisposable
         // and (when shown) the coach panel below. Entries are speaker-coalesced so they can wrap
         // to several rows; budget by estimated rendered rows (not entry count) so one long turn
         // can't push the footer off screen.
-        var reserved = _showAdvice ? CoachPanelRows : 0;
+        var reserved = _showAdvice || _answer != null ? CoachPanelRows : 0;
         var rowBudget = Math.Max(3, SafeWindowHeight() - 12 - reserved);
         var lineWidth = Math.Max(20, SafeWindowWidth() - 4); // minus panel border/padding
 
