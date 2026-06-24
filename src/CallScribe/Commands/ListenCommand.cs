@@ -156,6 +156,18 @@ public static class ListenCommand
             captions.OnAssignName = (label, name, token) =>
                 speakerId is null ? Task.FromResult(false) : speakerId.AssignNameAsync(label, name, token);
 
+            // Live /ask: answer a question about the transcript via the local model. Always wired
+            // (works without --coach); degrades to a message when Ollama is not running.
+            var askChat = new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive);
+            captions.OnAsk = async (question, transcript, token) =>
+            {
+                if (!askChat.IsReachable()) return "Q&A needs Ollama running locally.";
+                var prompt = TranscriptQa.BuildUserPrompt(question, transcript);
+                return await askChat
+                    .CompleteAsync(config.FastModel, TranscriptQa.SystemPrompt, prompt, jsonMode: false, maxTokens: 300, token)
+                    .ConfigureAwait(false);
+            };
+
             // The dashboard shows the live state; it starts when the first track attaches.
             captions.ConfigureDisplay(liveModel);
             captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);

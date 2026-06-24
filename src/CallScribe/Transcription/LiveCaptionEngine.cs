@@ -121,6 +121,13 @@ public sealed class LiveCaptionEngine : IDisposable
         set => _display.OnAssignName = value;
     }
 
+    /// <summary>Callback for the dashboard's /ask command (answer a question about the transcript).</summary>
+    public Func<string, string, CancellationToken, Task<string>>? OnAsk
+    {
+        get => _display.OnAsk;
+        set => _display.OnAsk = value;
+    }
+
     /// <summary>Wait until the user ends the session from the dashboard (/stop or Esc), or a
     /// line on stdin when output is redirected.</summary>
     public Task WaitForStopAsync(CancellationToken ct) => _display.WaitForStopAsync(ct);
