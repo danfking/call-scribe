@@ -10,6 +10,11 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- Expose internal pure helpers (RMS/amplitude/annotation gating) to the test project. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="CallScribe.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="Npgsql" Version="9.0.3" />

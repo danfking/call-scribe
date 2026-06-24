@@ -45,7 +45,10 @@ public static class CoachCommand
             ReplayAsync(parseResult.GetValue(scriptArgument)!, parseResult.GetValue(fastOption),
                 parseResult.GetValue(stubOption), ct));
 
-        var memtest = new Command("memtest", "Verify the memory store end-to-end: seed memories, then recall by similarity");
+        var memtest = new Command("memtest", "Verify the memory store end-to-end: seed memories, then recall by similarity")
+        {
+            Hidden = true, // dev-only DB diagnostic: still runnable, but kept out of --help
+        };
         memtest.SetAction((_, ct) => MemTestAsync(ct));
 
         var meetingOption = new Option<string?>("--meeting")

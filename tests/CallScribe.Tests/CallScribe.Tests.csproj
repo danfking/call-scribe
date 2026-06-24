@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CallScribe\CallScribe.csproj" />
-    <ProjectReference Include="..\..\tools\TranscriptReconcile\TranscriptReconcile.csproj" />
+    <ProjectReference Include="..\..\tests\CallScribe.TestSupport\CallScribe.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>
