@@ -33,6 +33,11 @@ public sealed class LiveStatusDisplay : IDisposable
     private volatile bool _dirty = true;
     private readonly TaskCompletionSource _stop = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // Slash-command registry (handlers close over this instance) and the autocomplete dropdown's
+    // currently-selected candidate index.
+    private readonly IReadOnlyList<SlashCommandSpec> _commands;
+    private int _selectedCandidate;
+
     /// <summary>Invoked when the user runs <c>/assign-name "label" "name"</c>: rename the
     /// speaker and persist the voiceprint. Returns false when no current speaker carries that
     /// label. Set by ListenCommand; null means name assignment is unavailable (speaker-id off).</summary>
@@ -58,6 +63,20 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
+
+    public LiveStatusDisplay()
+    {
+        // The single source of truth for the dashboard's commands: name, usage, whether the first
+        // arg is a speaker label (for completion), the handler, and aliases. Completion, highlighting,
+        // help, and dispatch all derive from this, so a new command is one entry here.
+        _commands =
+        [
+            new("/assign-name", "\"<label>\" \"<name>\"", true, HandleAssign, ["/rename"]),
+            new("/speakers", "list far-side speakers", false, _ => ShowSpeakers(), []),
+            new("/help", "show commands", false, _ => ShowHelp(), []),
+            new("/stop", "finish the session", false, _ => RequestStop(), []),
+        ];
+    }
 
     private static bool ConsoleIsUsable()
     {
@@ -225,49 +244,77 @@ public sealed class LiveStatusDisplay : IDisposable
             case ConsoleKey.Escape:
                 RequestStop();
                 break;
-            case ConsoleKey.Backspace:
-                if (_input.Length > 0) _input.Remove(_input.Length - 1, 1);
+            case ConsoleKey.UpArrow:
+                MoveCandidate(-1);
+                break;
+            case ConsoleKey.DownArrow:
+                MoveCandidate(1);
                 break;
             case ConsoleKey.Tab:
-                var completed = SlashCommand.ApplyTab(_input.ToString(), CurrentLabels());
-                _input.Clear();
-                _input.Append(completed);
+                ApplySelectedCandidate();
+                break;
+            case ConsoleKey.Backspace:
+                if (_input.Length > 0) _input.Remove(_input.Length - 1, 1);
+                _selectedCandidate = 0; // candidates changed; restart selection at the top
                 break;
             default:
-                if (!char.IsControl(key.KeyChar)) _input.Append(key.KeyChar);
+                if (!char.IsControl(key.KeyChar))
+                {
+                    _input.Append(key.KeyChar);
+                    _selectedCandidate = 0;
+                }
                 break;
         }
         _dirty = true;
+    }
+
+    /// <summary>Autocomplete candidates for the current input (commands while typing the verb, or
+    /// speaker labels for a label-taking command's first argument).</summary>
+    private IReadOnlyList<string> CurrentCandidates() =>
+        SlashCommand.Complete(_input.ToString(), _commands, CurrentLabels());
+
+    private void MoveCandidate(int delta)
+    {
+        var count = CurrentCandidates().Count;
+        if (count == 0) return;
+        _selectedCandidate = ((_selectedCandidate + delta) % count + count) % count; // wrap both ways
+    }
+
+    private void ApplySelectedCandidate()
+    {
+        var candidates = CurrentCandidates();
+        if (candidates.Count == 0) return;
+        var idx = Math.Clamp(_selectedCandidate, 0, candidates.Count - 1);
+        var completed = SlashCommand.ApplyCompletion(_input.ToString(), candidates[idx]);
+        _input.Clear();
+        _input.Append(completed);
+        _selectedCandidate = 0;
     }
 
     private void Submit()
     {
         var line = _input.ToString().Trim();
         _input.Clear();
+        _selectedCandidate = 0;
         if (line.Length == 0) return;
 
         var (cmd, args) = SlashCommand.ParseCommandLine(line);
-        switch (cmd.ToLowerInvariant())
+        var spec = SlashCommand.Match(cmd, _commands);
+        if (spec == null)
         {
-            case "/stop":
-                RequestStop();
-                break;
-            case "/help":
-                SetHint(SlashCommand.HelpText);
-                break;
-            case "/speakers":
-                var labels = CurrentLabels();
-                SetHint(labels.Count > 0 ? "Speakers: " + string.Join(", ", labels) : "No far-side speakers yet.");
-                break;
-            case "/assign-name":
-            case "/rename":
-                HandleAssign(args);
-                break;
-            default:
-                SetHint($"Unknown command '{cmd}'. Try /help.");
-                break;
+            SetHint($"Unknown command '{cmd}'. Try /help.");
+            return;
         }
+        spec.Handler(args);
     }
+
+    private void ShowSpeakers()
+    {
+        var labels = CurrentLabels();
+        SetHint(labels.Count > 0 ? "Speakers: " + string.Join(", ", labels) : "No far-side speakers yet.");
+    }
+
+    private void ShowHelp() => SetHint(SlashCommand.Help(_commands));
 
     private void HandleAssign(string[] args)
     {
@@ -365,19 +412,26 @@ public sealed class LiveStatusDisplay : IDisposable
                 .BorderColor(Color.Grey)
                 .Expand();
 
-            // Input line + a hint line: live autocomplete while typing a command, else the last
-            // command result, else the default reminder. (Computed under the lock we already hold.)
+            // Input line (command word colour-highlighted) plus, below it, a selectable autocomplete
+            // dropdown while typing a command, else the last command result or the default reminder.
             var labelList = _captions.Select(c => c.Label)
                 .Where(l => l != LiveCaptionEngine.MeLabel).Distinct().ToList();
-            var live = SlashCommand.Complete(_input.ToString(), labelList);
-            var hintText = _input.Length > 0 && live.Count > 0
-                ? string.Join("   ", live)
-                : _hint.Length > 0
+            var candidates = SlashCommand.Complete(_input.ToString(), _commands, labelList);
+            var inputLine = new Markup($"[grey]>[/] {SlashCommand.Highlight(_input.ToString(), _commands)}[grey]▌[/]");
+
+            IRenderable secondRow;
+            if (candidates.Count > 0)
+            {
+                secondRow = BuildCandidateDropdown(candidates);
+            }
+            else
+            {
+                var hintText = _hint.Length > 0
                     ? _hint
                     : $"/help for commands · /stop or Esc to finish · model {_model}";
-            var footer = new Rows(
-                new Markup($"[grey]>[/] {_input.ToString().EscapeMarkup()}[grey]▌[/]"),
-                new Markup($"[grey]{hintText.EscapeMarkup()}[/]"));
+                secondRow = new Markup($"[grey]{hintText.EscapeMarkup()}[/]");
+            }
+            var footer = new Rows(inputLine, secondRow);
 
             IRenderable body = transcript;
             if (_showAdvice)
@@ -411,6 +465,29 @@ public sealed class LiveStatusDisplay : IDisposable
             .Border(BoxBorder.Rounded)
             .BorderColor(Color.Grey)
             .Expand();
+    }
+
+    /// <summary>The autocomplete dropdown: a short vertical list of candidates with the selected one
+    /// highlighted. Windows to the selection when there are more candidates than fit.</summary>
+    private IRenderable BuildCandidateDropdown(IReadOnlyList<string> candidates)
+    {
+        const int maxRows = 6;
+        var sel = Math.Clamp(_selectedCandidate, 0, candidates.Count - 1);
+        var start = candidates.Count <= maxRows ? 0 : Math.Clamp(sel - maxRows + 1, 0, candidates.Count - maxRows);
+
+        var rows = new List<IRenderable>();
+        for (var i = start; i < Math.Min(candidates.Count, start + maxRows); i++)
+        {
+            var text = candidates[i].EscapeMarkup();
+            rows.Add(i == sel
+                ? new Markup($"  [black on cyan] {text} [/]")
+                : new Markup($"  [grey]{text}[/]"));
+        }
+        if (candidates.Count > 1)
+        {
+            rows.Add(new Markup("  [grey]↑↓ select · Tab to apply[/]"));
+        }
+        return new Rows(rows);
     }
 
     private IRenderable BuildTranscript()
