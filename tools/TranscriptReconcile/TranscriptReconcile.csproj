@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CallScribe\CallScribe.csproj" />
+    <ProjectReference Include="..\..\tests\CallScribe.TestSupport\CallScribe.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

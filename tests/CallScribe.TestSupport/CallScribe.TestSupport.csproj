@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Transcript reconciliation/scoring helpers (WER, alignment, VTT/markdown parsing). Shared by
+       the CallScribe.Tests suite and the tools/TranscriptReconcile CLI. Deliberately NOT in the main
+       CallScribe assembly: this is test/eval-only code with no production runtime role. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

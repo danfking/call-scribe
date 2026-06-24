@@ -4,8 +4,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CallScribe.Tests/CallScribe.Tests.csproj" />
+    <Project Path="tests/CallScribe.TestSupport/CallScribe.TestSupport.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/EchoHarness/EchoHarness.csproj" />
+    <Project Path="tools/TranscriptReconcile/TranscriptReconcile.csproj" />
   </Folder>
 </Solution>

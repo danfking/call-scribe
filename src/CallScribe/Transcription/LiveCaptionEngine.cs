@@ -282,7 +282,7 @@ public sealed class LiveCaptionEngine : IDisposable
     /// <summary>Whisper marks non-speech audio with bracketed annotations like
     /// [MUSIC PLAYING], (wind blowing) or [BLANK_AUDIO]. Those are noise in a
     /// caption feed: drop captions that contain nothing else.</summary>
-    private static bool IsNonSpeechAnnotation(string text)
+    internal static bool IsNonSpeechAnnotation(string text)
     {
         var stripped = System.Text.RegularExpressions.Regex
             .Replace(text, @"[\[\(\*][^\]\)\*]*[\]\)\*]", "")
@@ -336,7 +336,7 @@ public sealed class LiveCaptionEngine : IDisposable
     }
 
     /// <summary>RMS over the trailing window: low energy = the speaker paused.</summary>
-    private static bool IsTrailingSilence(MemoryStream buffer, WaveFormat format)
+    internal static bool IsTrailingSilence(MemoryStream buffer, WaveFormat format)
     {
         var tailBytes = (int)(format.AverageBytesPerSecond * SilenceTail.TotalSeconds);
         if (buffer.Length < tailBytes) return false;
@@ -344,7 +344,7 @@ public sealed class LiveCaptionEngine : IDisposable
     }
 
     /// <summary>Max RMS across coarse slices, so a short utterance in a long buffer still counts.</summary>
-    private static float PeakRms(MemoryStream buffer, WaveFormat format)
+    internal static float PeakRms(MemoryStream buffer, WaveFormat format)
     {
         var sliceBytes = Math.Max(1, format.AverageBytesPerSecond / 2);
         var peak = 0f;
@@ -357,7 +357,7 @@ public sealed class LiveCaptionEngine : IDisposable
     }
 
     /// <summary>Largest absolute sample value in the buffer (device format).</summary>
-    private static float PeakAmplitude(MemoryStream buffer, WaveFormat format)
+    internal static float PeakAmplitude(MemoryStream buffer, WaveFormat format)
     {
         var data = buffer.GetBuffer();
         var end = (int)buffer.Length;
