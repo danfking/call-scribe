@@ -186,8 +186,22 @@ public sealed class AppConfig
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
-    public static string ConfigPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "call-scribe", "config.json");
+    public static string ConfigPath => Path.Combine(ConfigDir, "call-scribe", "config.json");
+
+    // ApplicationData (roaming AppData) is the right home on Windows, but .NET returns an empty
+    // string for it on Linux/macOS, which would collapse the config path to a relative one. Fall
+    // back to LocalApplicationData there (the same base the models live under) so the config has a
+    // real home off-Windows, e.g. in the Docker image. Windows is unchanged: roaming is non-empty.
+    private static string ConfigDir
+    {
+        get
+        {
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return string.IsNullOrEmpty(roaming)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
+                : roaming;
+        }
+    }
 
     public static AppConfig Load()
     {

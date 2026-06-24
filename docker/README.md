@@ -19,16 +19,18 @@ The intended split: a Windows host produces the WAV pair, then any machine trans
 
 ## Layout under `/data`
 
-The image sets `HOME=/data`, so one mounted volume holds everything call-scribe reads and writes:
+The image sets `HOME=/data`. On Linux .NET maps `UserProfile` to `$HOME` and `LocalApplicationData` to `$XDG_DATA_HOME` (and `AppConfig.ConfigPath` falls back to `LocalApplicationData` because `ApplicationData` is empty there), so call-scribe reads and writes under:
 
 | Path | Holds |
 | --- | --- |
-| `/data/.config/call-scribe/config.json` | settings (Ollama URL, Postgres connection) |
+| `/data/.local/share/call-scribe/config.json` | settings (Ollama URL, Postgres connection) |
 | `/data/.local/share/call-scribe/models` | whisper + speaker ONNX models |
 | `/data/call-scribe/recordings` | the `.others.wav` / `.me.wav` pairs you drop in |
 | `/data/call-scribe/transcripts` | the `.md` transcripts produced |
 
-The compose file bind-mounts `./data` (next to the compose file, i.e. `docker/data`) to `/data` and overlays `callscribe.config.json` read-only at the config path. Whisper models download automatically on first transcription; the speaker ONNX models must be placed under the models directory yourself.
+The compose file mounts host `./data` (next to the compose file, i.e. `docker/data`) at `/data/call-scribe`, so your recordings live in `docker/data/recordings` and transcripts appear in `docker/data/transcripts`. It also mounts `callscribe.config.json` read-only at the config path and keeps a named volume for the downloaded models.
+
+Note the user files mount at the `/data/call-scribe` subpath, not over `/data` itself: a host bind mount over `$HOME` breaks .NET's home-directory resolution in the container (the model and config paths then collapse onto the working directory). Whisper models download automatically on first transcription; the speaker ONNX models must be placed under the models directory yourself.
 
 ## Build
 

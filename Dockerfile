@@ -8,10 +8,13 @@
 # Multi-arch via buildx:
 #   docker buildx build --platform linux/amd64,linux/arm64 -t call-scribe:latest .
 
-ARG DOTNET_VERSION=10.0
+# Base-image tag only. Do NOT reuse the name DOTNET_VERSION: the .NET base images export
+# ENV DOTNET_VERSION=<full patch> (e.g. 10.0.9), which would shadow an ARG of the same name inside
+# RUN steps and expand net${DOTNET_VERSION} to an invalid net10.0.9 TFM.
+ARG DOTNET_TAG=10.0
 
 # ---- build (runs on the native builder arch; cross-publishes for the target arch) ----
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_TAG} AS build
 ARG TARGETARCH
 WORKDIR /src
 
@@ -28,18 +31,18 @@ RUN case "$TARGETARCH" in \
 # needs the Windows targeting packs) and is never published here anyway.
 COPY Directory.Build.props ./
 COPY src/CallScribe/CallScribe.csproj src/CallScribe/
-RUN dotnet restore src/CallScribe/CallScribe.csproj -r "$(cat /rid)" -p:TargetFrameworks=net${DOTNET_VERSION}
+RUN dotnet restore src/CallScribe/CallScribe.csproj -r "$(cat /rid)" -p:TargetFrameworks=net10.0
 
 # Publish the portable build, framework-dependent: the runtime base image carries the .NET runtime,
 # and the RID pulls in the linux native libraries for Whisper.net and sherpa-onnx.
 COPY src/ src/
 RUN dotnet publish src/CallScribe/CallScribe.csproj \
-      -f net${DOTNET_VERSION} -c Release -p:TargetFrameworks=net${DOTNET_VERSION} \
+      -f net10.0 -c Release -p:TargetFrameworks=net10.0 \
       -r "$(cat /rid)" --self-contained false --no-restore \
       -o /app
 
 # ---- runtime (glibc Debian base; whisper/sherpa natives need glibc, not Alpine musl) ----
-FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_VERSION} AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_TAG} AS runtime
 
 # whisper.cpp and onnxruntime native libraries want OpenMP at runtime.
 RUN apt-get update \
@@ -52,7 +55,18 @@ RUN apt-get update \
 #   /data/.config/call-scribe/config.json          settings (Ollama URL, Postgres conn)
 #   /data/.local/share/call-scribe/models          whisper + speaker ONNX models
 #   /data/call-scribe/recordings, /transcripts      the WAV pairs in, the .md transcripts out
-ENV HOME=/data
+# Pin the base directories call-scribe reads, all under /data. On Linux .NET maps UserProfile ->
+# $HOME and LocalApplicationData -> $XDG_DATA_HOME (config and models both live under the latter; see
+# AppConfig.ConfigPath, which falls back to LocalApplicationData because ApplicationData is empty on
+# Linux). $HOME must be an existing directory or .NET cannot determine it and the paths collapse onto
+# the working directory, so /data is created here. Mount user files at the /data/call-scribe subpath
+# rather than over /data itself: a host bind mount over $HOME breaks .NET's home determination.
+#   /data/.local/share/call-scribe/models        whisper + speaker ONNX models (and state/)
+#   /data/.local/share/call-scribe/config.json    settings (Ollama URL, Postgres conn)
+#   /data/call-scribe/recordings, /transcripts    the WAV pairs in, the .md transcripts out
+ENV HOME=/data \
+    XDG_DATA_HOME=/data/.local/share
+RUN mkdir -p /data/.local/share
 WORKDIR /app
 COPY --from=build /app ./
 ENTRYPOINT ["dotnet", "/app/call-scribe.dll"]

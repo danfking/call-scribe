@@ -1,13 +1,13 @@
 # Full offline call-scribe stack: the app (transcribe / diarize / coach), Ollama for local
 # inference, and the TimescaleDB + pgvector memory store. Live capture is NOT here (Windows-only):
-# record on a Windows host, drop the .others.wav / .me.wav pair into ./data/call-scribe/recordings,
-# then run the app container to transcribe and coach.
+# record on a Windows host, drop the .others.wav / .me.wav pair into ./data/recordings, then run the
+# app container to transcribe and coach.
 #
 #   # bring up the dependencies once
 #   docker compose -f docker/callscribe.compose.yml up -d coach-db ollama
 #   # pull the coach models into the ollama volume (first run only)
 #   docker compose -f docker/callscribe.compose.yml exec ollama ollama pull qwen3:4b
-#   # transcribe the latest recording in ./data/call-scribe/recordings
+#   # transcribe the latest recording in ./data/recordings
 #   docker compose -f docker/callscribe.compose.yml run --rm app transcribe
 #
 # The app service has no default command: pass a call-scribe verb (transcribe, coach, config).
@@ -21,9 +21,14 @@ services:
       - coach-db
       - ollama
     volumes:
-      # One home for config, models, recordings and transcripts (see Dockerfile HOME=/data).
-      - ./data:/data
-      - ./callscribe.config.json:/data/.config/call-scribe/config.json:ro
+      # Recordings in, transcripts out. Mounted at the /data/call-scribe subpath, NOT over /data
+      # itself: a host bind mount over $HOME breaks .NET's home-directory resolution in the container.
+      # On the host these land in ./data/recordings and ./data/transcripts.
+      - ./data:/data/call-scribe
+      # Settings (Ollama URL, Postgres conn). ConfigPath resolves under LocalApplicationData on Linux.
+      - ./callscribe.config.json:/data/.local/share/call-scribe/config.json:ro
+      # Persist the downloaded whisper/speaker models across runs.
+      - callscribe-models:/data/.local/share/call-scribe/models
     # Run on demand rather than starting with `up`: it is a CLI, not a long-lived service.
     profiles: ["app"]
 
@@ -52,3 +57,4 @@ services:
 volumes:
   callscribe-db-data:
   callscribe-ollama:
+  callscribe-models:
