@@ -35,12 +35,21 @@ public sealed class LiveCaptionEngine : IDisposable
     private static readonly TimeSpan SpeakerResolveTimeout = TimeSpan.FromSeconds(2);
 
     // Loopback capture level scales with the device volume, so this must sit well
-    // below quiet-listening levels while staying above digital silence.
+    // below quiet-listening levels while staying above digital silence. Used for the Others
+    // (loopback) track and for trailing-pause detection.
     private const float SilenceRmsThreshold = 0.002f;
+
+    // The mic ("Me") track needs a higher bar than the loopback-silence threshold: a live but
+    // muted mic (muted in the meeting app, or just idle) still delivers continuous near-silent
+    // audio whose noise floor sits above SilenceRmsThreshold, which made the Me track churn
+    // Listening/Transcribing while the user was not speaking. Measured mic levels put real speech
+    // well above 0.01 and idle/noise-floor below it. Overridable via config (LiveMeSpeechThreshold).
+    private const double DefaultMeSpeechThreshold = 0.01;
 
     public const string OthersLabel = "Others";
     public const string MeLabel = "Me";
 
+    private readonly double _meSpeechThreshold;
     private readonly WhisperFactory _factory;
     private readonly LiveStatusDisplay _display = new();
     private readonly CrossTrackEchoFilter _echoFilter = new();
@@ -72,10 +81,16 @@ public sealed class LiveCaptionEngine : IDisposable
     /// decision, bounded by <see cref="SpeakerResolveTimeout"/>.</summary>
     public Func<float[], CancellationToken, Task<MeSpeakerResult>>? IdentifyMeSpeaker { get; set; }
 
-    public LiveCaptionEngine(string modelPath)
+    public LiveCaptionEngine(string modelPath, double meSpeechThreshold = DefaultMeSpeechThreshold)
     {
         _factory = WhisperFactory.FromPath(modelPath);
+        _meSpeechThreshold = meSpeechThreshold;
     }
+
+    /// <summary>Minimum peak RMS for a buffer on this track to count as speech (vs silence/noise
+    /// floor). The mic track sits above the noise floor; the loopback track keeps the low
+    /// silence threshold so quiet far-side bleed is still caught for echo suppression.</summary>
+    private double GateFor(string label) => label == MeLabel ? _meSpeechThreshold : SilenceRmsThreshold;
 
     public void Attach(string label, string colour, ChannelReader<AudioChunk> tap, WaveFormat sourceFormat)
     {
@@ -125,16 +140,27 @@ public sealed class LiveCaptionEngine : IDisposable
         using var processor = _factory.CreateBuilder().WithLanguage("en").Build();
         var buffer = new MemoryStream();
         var spanStart = DateTime.Now;
+        var gate = GateFor(label);
+        var heard = false; // has audio in the current buffer crossed the gate yet
 
         await foreach (var chunk in tap.ReadAllAsync().ConfigureAwait(false))
         {
             if (buffer.Length == 0)
             {
                 spanStart = DateTime.Now;
+                heard = false;
                 if (label == OthersLabel) SetOthersUnresolvedFrom(spanStart);
-                _display.SetState(label, TrackState.Hearing);
             }
             buffer.Write(chunk.Buffer, 0, chunk.Count);
+
+            // Show the track as active ("Hearing") only once incoming audio crosses its gate, so a
+            // muted or idle mic (continuous near-silent chunks) stays "Listening" instead of
+            // churning to Hearing on every buffer while the user is not speaking.
+            if (!heard && Rms(chunk.Buffer.AsSpan(0, chunk.Count), format) >= gate)
+            {
+                heard = true;
+                _display.SetState(label, TrackState.Hearing);
+            }
 
             var buffered = TimeSpan.FromSeconds((double)buffer.Length / format.AverageBytesPerSecond);
             var atPause = buffered >= MinWindow && IsTrailingSilence(buffer, format);
@@ -164,12 +190,12 @@ public sealed class LiveCaptionEngine : IDisposable
         var spanEnd = DateTime.Now;
         try
         {
-            // Whisper hallucinates on pure silence; skip chunks with no audible content.
-            // Residual limitation: when the loopback signal sits below this threshold but
-            // the mic's gain-normalised copy still transcribes (low speaker volume), the
-            // span resolves with no Others caption, so genuine bleed can still print as Me.
-            // This is the documented speakers-vs-headphones limitation.
-            if (PeakRms(buffer, format) < SilenceRmsThreshold) return;
+            // Whisper hallucinates on pure silence; skip buffers below the track's speech gate
+            // (the mic gate is above its noise floor, so a muted/idle mic never transcribes).
+            // Residual limitation: when the loopback signal sits below its threshold but the mic's
+            // gain-normalised copy still transcribes (low speaker volume), the span resolves with no
+            // Others caption, so genuine bleed can still print as Me (the speakers-vs-headphones case).
+            if (PeakRms(buffer, format) < GateFor(label)) return;
 
             _display.SetState(label, TrackState.Transcribing);
             using var wav16k = ConvertTo16kMonoWav(buffer, format, PeakAmplitude(buffer, format));
@@ -340,18 +366,20 @@ public sealed class LiveCaptionEngine : IDisposable
     {
         var tailBytes = (int)(format.AverageBytesPerSecond * SilenceTail.TotalSeconds);
         if (buffer.Length < tailBytes) return false;
-        return Rms(buffer, format, (int)(buffer.Length - tailBytes), tailBytes) < SilenceRmsThreshold;
+        var tail = buffer.GetBuffer().AsSpan((int)(buffer.Length - tailBytes), tailBytes);
+        return Rms(tail, format) < SilenceRmsThreshold;
     }
 
     /// <summary>Max RMS across coarse slices, so a short utterance in a long buffer still counts.</summary>
     internal static float PeakRms(MemoryStream buffer, WaveFormat format)
     {
+        var data = buffer.GetBuffer().AsSpan(0, (int)buffer.Length);
         var sliceBytes = Math.Max(1, format.AverageBytesPerSecond / 2);
         var peak = 0f;
-        for (var offset = 0; offset < buffer.Length; offset += sliceBytes)
+        for (var offset = 0; offset < data.Length; offset += sliceBytes)
         {
-            var length = (int)Math.Min(sliceBytes, buffer.Length - offset);
-            peak = Math.Max(peak, Rms(buffer, format, offset, length));
+            var length = Math.Min(sliceBytes, data.Length - offset);
+            peak = Math.Max(peak, Rms(data.Slice(offset, length), format));
         }
         return peak;
     }
@@ -380,29 +408,28 @@ public sealed class LiveCaptionEngine : IDisposable
         return peak;
     }
 
-    private static float Rms(MemoryStream buffer, WaveFormat format, int offset, int byteCount)
+    /// <summary>RMS of a PCM span (IEEE float or 16-bit), normalised to [0,1]. Unknown formats
+    /// return float.MaxValue so they are never classified as silence.</summary>
+    internal static float Rms(ReadOnlySpan<byte> data, WaveFormat format)
     {
-        var data = buffer.GetBuffer();
         double sum = 0;
         long count = 0;
 
         if (format.BitsPerSample == 32)
         {
             // WASAPI shared-mode captures deliver IEEE float.
-            var floats = (byteCount / 4) * 4;
-            for (var i = 0; i < floats; i += 4)
+            for (var i = 0; i + 4 <= data.Length; i += 4)
             {
-                var sample = BitConverter.ToSingle(data, offset + i);
+                var sample = BitConverter.ToSingle(data.Slice(i, 4));
                 sum += sample * sample;
                 count++;
             }
         }
         else if (format.BitsPerSample == 16)
         {
-            var shorts = (byteCount / 2) * 2;
-            for (var i = 0; i < shorts; i += 2)
+            for (var i = 0; i + 2 <= data.Length; i += 2)
             {
-                var sample = BitConverter.ToInt16(data, offset + i) / 32768f;
+                var sample = BitConverter.ToInt16(data.Slice(i, 2)) / 32768f;
                 sum += sample * sample;
                 count++;
             }

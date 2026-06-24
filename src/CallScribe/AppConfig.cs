@@ -26,6 +26,16 @@ public sealed class AppConfig
     [JsonPropertyName("liveModel")]
     public string LiveModel { get; set; } = "small.en";
 
+    /// <summary>Minimum peak RMS (0..1) for the mic ("Me") track to count a window as the user's
+    /// speech rather than a muted or idle mic's noise floor. Higher than the cross-track echo
+    /// threshold (which stays low to catch quiet far-side bleed): a live but muted mic still
+    /// delivers continuous near-silent audio, so without this the Me track churns
+    /// Listening/Transcribing while you are not speaking. Grounded in measured mic levels (speech
+    /// sits well above 0.01, idle below it). Raise it if a muted mic still shows activity; lower it
+    /// if your quiet speech is dropped.</summary>
+    [JsonPropertyName("liveMeSpeechThreshold")]
+    public double LiveMeSpeechThreshold { get; set; } = 0.01;
+
     [JsonPropertyName("language")]
     public string Language { get; set; } = "en";
 

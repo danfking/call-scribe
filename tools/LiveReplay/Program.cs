@@ -17,7 +17,7 @@ using Whisper.net.Ggml;
 //   dotnet run --project tools/LiveReplay -- --stem 2026-06-23-0931 --live-model small.en [--session-merge 0.7]
 
 string? stem = null, liveModel = null, outPath = null;
-double? merge = null, minSpeaker = null, consolidateDistance = null;
+double? merge = null, minSpeaker = null, consolidateDistance = null, meSpeechThreshold = null;
 int? consolidateMinSupport = null;
 bool consolidate = false;
 for (var i = 0; i < args.Length; i++)
@@ -28,6 +28,7 @@ for (var i = 0; i < args.Length; i++)
         case "--live-model": liveModel = Arg(ref i); break;
         case "--session-merge": merge = double.Parse(Arg(ref i)); break;
         case "--min-speaker-seconds": minSpeaker = double.Parse(Arg(ref i)); break;
+        case "--me-speech-threshold": meSpeechThreshold = double.Parse(Arg(ref i)); break;
         // Apply the after-meeting speaker-consolidation pass to the replayed transcript, so the
         // emitted labels match what a real `listen` would persist after #35's stop-time fold. With
         // a value, A/B that merge distance; bare, use the configured SpeakerConsolidationDistance.
@@ -40,7 +41,7 @@ for (var i = 0; i < args.Length; i++)
 string Arg(ref int i) => ++i < args.Length ? args[i] : throw new ArgumentException("missing value for option");
 if (stem is null)
 {
-    Console.Error.WriteLine("Usage: LiveReplay --stem <stem> [--live-model base.en] [--session-merge d] [--min-speaker-seconds d] [--consolidate [d]] [--consolidate-min-support n] [--out file]");
+    Console.Error.WriteLine("Usage: LiveReplay --stem <stem> [--live-model base.en] [--session-merge d] [--min-speaker-seconds d] [--me-speech-threshold d] [--consolidate [d]] [--consolidate-min-support n] [--out file]");
     return 2;
 }
 
@@ -49,6 +50,7 @@ if (config.OutputRoot != null) AppPaths.OutputRootOverride = config.OutputRoot;
 liveModel ??= config.LiveModel; // match the live default; pass --live-model to A/B another
 if (merge is { } mg) config.SessionMergeDistance = mg;
 if (minSpeaker is { } ms) config.LiveMinSpeakerSeconds = ms;
+if (meSpeechThreshold is { } mst) config.LiveMeSpeechThreshold = mst;
 
 var othersWav = Path.Combine(AppPaths.RecordingsDir, stem + ".others.wav");
 var meWav = Path.Combine(AppPaths.RecordingsDir, stem + ".me.wav");
@@ -60,12 +62,12 @@ if (!File.Exists(othersWav) || !File.Exists(meWav))
 
 var modelPath = await ModelManager.EnsureWhisperModelAsync(
     ModelManager.ParseModel(liveModel), QuantizationType.NoQuantization, CancellationToken.None);
-Console.WriteLine($"live model {liveModel}; sessionMerge {config.SessionMergeDistance}; minSpeakerSeconds {config.LiveMinSpeakerSeconds}");
+Console.WriteLine($"live model {liveModel}; sessionMerge {config.SessionMergeDistance}; minSpeakerSeconds {config.LiveMinSpeakerSeconds}; meSpeechThreshold {config.LiveMeSpeechThreshold}");
 
 var speakerId = await SpeakerIdentity.TryCreateAsync(config, CancellationToken.None);
 Console.WriteLine(speakerId is null ? "speaker-id OFF (labels stay Me/Others)" : "speaker-id ON");
 
-using var captions = new LiveCaptionEngine(modelPath);
+using var captions = new LiveCaptionEngine(modelPath, config.LiveMeSpeechThreshold);
 if (speakerId is not null)
 {
     captions.ResolveOthersSpeaker = (samples, token) => speakerId.ResolveAsync(samples, token);

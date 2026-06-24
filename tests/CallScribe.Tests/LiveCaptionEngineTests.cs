@@ -61,6 +61,17 @@ public class LiveCaptionEngineTests
     }
 
     [Fact]
+    public void PeakRms_MutedMicNoiseFloor_SitsBetweenEchoAndMeSpeechGates()
+    {
+        // The #41 fix: a live-but-muted mic's noise floor (~0.005 RMS) is ABOVE the 0.002 echo
+        // threshold (so the old code transcribed it and the Me track churned) but BELOW the 0.01
+        // Me speech gate, so the gate now treats it as silence. Real speech stays well above the gate.
+        var noiseFloor = LiveCaptionEngine.PeakRms(Constant(16000, 164), Pcm16Mono); // 164/32768 ~= 0.005
+        Assert.InRange(noiseFloor, 0.002f, 0.01f);
+        Assert.True(LiveCaptionEngine.PeakRms(Constant(16000, 16384), Pcm16Mono) > 0.01f); // half scale = speech
+    }
+
+    [Fact]
     public void IsTrailingSilence_TrueWhenTheTailIsSilent()
     {
         // 1.0s of tone followed by 0.7s of silence: the trailing 0.6s window is silent.
