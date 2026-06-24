@@ -98,7 +98,7 @@ public static class ListenCommand
 
         var stem = RecordCommand.MakeStem(label);
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config, aecMic: aec, aecSuppressionLevel: aes);
-        using var captions = new LiveCaptionEngine(liveModelPath);
+        using var captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
 
         // Created inside the try so a cancellation (Ctrl-C) during capture still disposes
         // their native (sherpa) and DB-pool handles via the finally.
