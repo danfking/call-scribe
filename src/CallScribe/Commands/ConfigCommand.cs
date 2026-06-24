@@ -5,6 +5,116 @@ namespace CallScribe.Commands;
 
 public static class ConfigCommand
 {
+    /// <summary>One settable config field: how to show it, and how to apply a new value (null = reset
+    /// to default). The registry below is the single source of truth, so <c>set</c>, the table in
+    /// <c>show</c>, and the <c>key</c> argument's help can never drift apart.</summary>
+    private sealed record ConfigSetting(
+        string Key,
+        Func<string> Default,
+        Func<AppConfig, string> Value,
+        Action<AppConfig, string?> Apply,
+        bool StartsGroup = false);
+
+    private static readonly IReadOnlyList<ConfigSetting> Settings =
+    [
+        new("micDevice", () => "default communications mic",
+            c => c.MicDevice ?? "[grey](default)[/]",
+            (c, v) => c.MicDevice = v),
+        new("loopbackDevice", () => "default communications output",
+            c => c.LoopbackDevice ?? "[grey](default)[/]",
+            (c, v) => c.LoopbackDevice = v),
+        new("model", () => "large-v3-turbo",
+            c => c.Model.EscapeMarkup(),
+            (c, v) => { if (v != null) Transcription.ModelManager.ParseModel(v); c.Model = v ?? "large-v3-turbo"; }),
+        new("liveModel", () => "small.en",
+            c => c.LiveModel.EscapeMarkup(),
+            (c, v) => { if (v != null) Transcription.ModelManager.ParseModel(v); c.LiveModel = v ?? "small.en"; }),
+        new("language", () => "en",
+            c => c.Language.EscapeMarkup(),
+            (c, v) => c.Language = v ?? "en"),
+        new("outputRoot", () => AppPaths.OutputRoot.EscapeMarkup(),
+            c => c.OutputRoot ?? "[grey](default)[/]",
+            (c, v) =>
+            {
+                if (v != null && LooksSynced(v))
+                {
+                    AnsiConsole.MarkupLine(
+                        "[yellow]Warning:[/] that path looks like a synced folder (OneDrive/Dropbox/Documents). " +
+                        "Call recordings will sync to that service.");
+                }
+                c.OutputRoot = v == null ? null : Path.GetFullPath(v);
+            }),
+        new("keepAudio", () => "true",
+            c => c.KeepAudio.ToString().ToLowerInvariant(),
+            (c, v) => c.KeepAudio = v == null || bool.Parse(v)),
+
+        new("coachEnabled", () => "false",
+            c => c.CoachEnabled.ToString().ToLowerInvariant(),
+            (c, v) => c.CoachEnabled = v != null && bool.Parse(v), StartsGroup: true),
+        new("ollamaUrl", () => "http://localhost:11434",
+            c => c.OllamaUrl.EscapeMarkup(),
+            (c, v) => c.OllamaUrl = v ?? "http://localhost:11434"),
+        new("fastModel", () => "qwen3:4b",
+            c => c.FastModel.EscapeMarkup(),
+            (c, v) => c.FastModel = v ?? "qwen3:4b"),
+        new("reasoningModel", () => "llama3.1:8b",
+            c => c.ReasoningModel.EscapeMarkup(),
+            (c, v) => c.ReasoningModel = v ?? "llama3.1:8b"),
+        new("embedModel", () => "nomic-embed-text",
+            c => c.EmbedModel.EscapeMarkup(),
+            (c, v) => c.EmbedModel = v ?? "nomic-embed-text"),
+        new("ollamaKeepAlive", () => "10m",
+            c => c.OllamaKeepAlive.EscapeMarkup(),
+            (c, v) => c.OllamaKeepAlive = v ?? "10m"),
+        new("coachRecallMaxDistance", () => "0.35",
+            c => c.CoachRecallMaxDistance.ToString("0.##"),
+            (c, v) => c.CoachRecallMaxDistance = v == null ? 0.35 : double.Parse(v)),
+        new("postgresConn", () => "localhost:5432/callscribe",
+            _ => "[grey](hidden)[/]",
+            (c, v) => c.PostgresConn = v
+                ?? "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres"),
+
+        new("speakerIdEnabled", () => "false",
+            c => c.SpeakerIdEnabled.ToString().ToLowerInvariant(),
+            (c, v) => c.SpeakerIdEnabled = v != null && bool.Parse(v), StartsGroup: true),
+        new("diarizeAfterMeeting", () => "true",
+            c => c.DiarizeAfterMeeting.ToString().ToLowerInvariant(),
+            (c, v) => c.DiarizeAfterMeeting = v == null || bool.Parse(v)),
+        new("voiceprintMaxDistance", () => "0.3",
+            c => c.VoiceprintMaxDistance.ToString("0.##"),
+            (c, v) => c.VoiceprintMaxDistance = v == null ? 0.30 : double.Parse(v)),
+        new("speakerSegModel", () => "sherpa-onnx-pyannote-segmentation-3-0.onnx",
+            c => c.SpeakerSegModel.EscapeMarkup(),
+            (c, v) => c.SpeakerSegModel = v ?? "sherpa-onnx-pyannote-segmentation-3-0.onnx"),
+        new("speakerEmbedModel", () => "nemo_en_titanet_small.onnx",
+            c => c.SpeakerEmbedModel.EscapeMarkup(),
+            (c, v) => c.SpeakerEmbedModel = v ?? "nemo_en_titanet_small.onnx"),
+        new("selfSpeakerName", () => "(none)",
+            c => c.SelfSpeakerName ?? "[grey](not enrolled)[/]",
+            (c, v) => c.SelfSpeakerName = v),
+        new("selfMatchMaxDistance", () => "0.6",
+            c => c.SelfMatchMaxDistance.ToString("0.##"),
+            (c, v) => c.SelfMatchMaxDistance = v == null ? 0.6 : double.Parse(v)),
+        new("diarizationClusterThreshold", () => "0.75",
+            c => c.DiarizationClusterThreshold.ToString("0.##"),
+            (c, v) => c.DiarizationClusterThreshold = v == null ? 0.75f : float.Parse(v)),
+        new("diarizationMinClusterSeconds", () => "8",
+            c => c.DiarizationMinClusterSeconds.ToString("0.##"),
+            (c, v) => c.DiarizationMinClusterSeconds = v == null ? 8.0 : double.Parse(v)),
+        new("sessionMergeDistance", () => "0.7",
+            c => c.SessionMergeDistance.ToString("0.##"),
+            (c, v) => c.SessionMergeDistance = v == null ? 0.70 : double.Parse(v)),
+        new("liveMinSpeakerSeconds", () => "1.5",
+            c => c.LiveMinSpeakerSeconds.ToString("0.##"),
+            (c, v) => c.LiveMinSpeakerSeconds = v == null ? 1.5 : double.Parse(v)),
+        new("speakerConsolidationDistance", () => "0.8",
+            c => c.SpeakerConsolidationDistance.ToString("0.##"),
+            (c, v) => c.SpeakerConsolidationDistance = v == null ? 0.80 : double.Parse(v)),
+        new("speakerConsolidationMinClips", () => "3",
+            c => c.SpeakerConsolidationMinClips.ToString(),
+            (c, v) => c.SpeakerConsolidationMinClips = v == null ? 3 : int.Parse(v)),
+    ];
+
     public static Command Create()
     {
         var command = new Command("config", "Show or change settings");
@@ -12,12 +122,7 @@ public static class ConfigCommand
 
         var keyArgument = new Argument<string>("key")
         {
-            Description = "micDevice | loopbackDevice | model | liveModel | language | outputRoot | keepAudio | "
-                          + "coachEnabled | ollamaUrl | fastModel | reasoningModel | embedModel | "
-                          + "coachRecallMaxDistance | postgresConn | speakerIdEnabled | "
-                          + "diarizeAfterMeeting | voiceprintMaxDistance | speakerSegModel | speakerEmbedModel | "
-                          + "selfSpeakerName | selfMatchMaxDistance | diarizationClusterThreshold | "
-                          + "diarizationMinClusterSeconds | sessionMergeDistance | liveMinSpeakerSeconds",
+            Description = string.Join(" | ", Settings.Select(s => s.Key)),
         };
         var valueArgument = new Argument<string>("value")
         {
@@ -42,33 +147,11 @@ public static class ConfigCommand
         table.AddColumn("Value");
         table.AddColumn("Default");
 
-        table.AddRow("micDevice", config.MicDevice ?? "[grey](default)[/]", "default communications mic");
-        table.AddRow("loopbackDevice", config.LoopbackDevice ?? "[grey](default)[/]", "default communications output");
-        table.AddRow("model", config.Model, "large-v3-turbo");
-        table.AddRow("liveModel", config.LiveModel, "small.en");
-        table.AddRow("language", config.Language, "en");
-        table.AddRow("outputRoot", config.OutputRoot ?? "[grey](default)[/]", AppPaths.OutputRoot.EscapeMarkup());
-        table.AddRow("keepAudio", config.KeepAudio.ToString().ToLowerInvariant(), "true");
-        table.AddEmptyRow();
-        table.AddRow("coachEnabled", config.CoachEnabled.ToString().ToLowerInvariant(), "false");
-        table.AddRow("ollamaUrl", config.OllamaUrl.EscapeMarkup(), "http://localhost:11434");
-        table.AddRow("fastModel", config.FastModel.EscapeMarkup(), "qwen3:4b");
-        table.AddRow("reasoningModel", config.ReasoningModel.EscapeMarkup(), "llama3.1:8b");
-        table.AddRow("embedModel", config.EmbedModel.EscapeMarkup(), "nomic-embed-text");
-        table.AddRow("coachRecallMaxDistance", config.CoachRecallMaxDistance.ToString("0.##"), "0.35");
-        table.AddRow("postgresConn", "[grey](hidden)[/]", "localhost:5432/callscribe");
-        table.AddEmptyRow();
-        table.AddRow("speakerIdEnabled", config.SpeakerIdEnabled.ToString().ToLowerInvariant(), "false");
-        table.AddRow("diarizeAfterMeeting", config.DiarizeAfterMeeting.ToString().ToLowerInvariant(), "true");
-        table.AddRow("voiceprintMaxDistance", config.VoiceprintMaxDistance.ToString("0.##"), "0.3");
-        table.AddRow("speakerSegModel", config.SpeakerSegModel.EscapeMarkup(), "sherpa-onnx-pyannote-segmentation-3-0.onnx");
-        table.AddRow("speakerEmbedModel", config.SpeakerEmbedModel.EscapeMarkup(), "nemo_en_titanet_small.onnx");
-        table.AddRow("selfSpeakerName", config.SelfSpeakerName ?? "[grey](not enrolled)[/]", "(none)");
-        table.AddRow("selfMatchMaxDistance", config.SelfMatchMaxDistance.ToString("0.##"), "0.6");
-        table.AddRow("diarizationClusterThreshold", config.DiarizationClusterThreshold.ToString("0.##"), "0.75");
-        table.AddRow("diarizationMinClusterSeconds", config.DiarizationMinClusterSeconds.ToString("0.##"), "8");
-        table.AddRow("sessionMergeDistance", config.SessionMergeDistance.ToString("0.##"), "0.7");
-        table.AddRow("liveMinSpeakerSeconds", config.LiveMinSpeakerSeconds.ToString("0.##"), "1.5");
+        foreach (var setting in Settings)
+        {
+            if (setting.StartsGroup) table.AddEmptyRow();
+            table.AddRow(setting.Key, setting.Value(config), setting.Default());
+        }
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]Config file: {AppConfig.ConfigPath.EscapeMarkup()}[/]");
@@ -77,103 +160,19 @@ public static class ConfigCommand
 
     private static int Set(string key, string value)
     {
-        var config = AppConfig.Load();
-        var cleared = string.IsNullOrWhiteSpace(value);
-
-        switch (key.ToLowerInvariant())
+        var setting = Settings.FirstOrDefault(s => s.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+        if (setting == null)
         {
-            case "micdevice":
-                config.MicDevice = cleared ? null : value;
-                break;
-            case "loopbackdevice":
-                config.LoopbackDevice = cleared ? null : value;
-                break;
-            case "model":
-                if (!cleared) Transcription.ModelManager.ParseModel(value); // validate
-                config.Model = cleared ? "large-v3-turbo" : value;
-                break;
-            case "livemodel":
-                if (!cleared) Transcription.ModelManager.ParseModel(value); // validate
-                config.LiveModel = cleared ? "small.en" : value;
-                break;
-            case "language":
-                config.Language = cleared ? "en" : value;
-                break;
-            case "outputroot":
-                if (!cleared && LooksSynced(value))
-                {
-                    AnsiConsole.MarkupLine(
-                        "[yellow]Warning:[/] that path looks like a synced folder (OneDrive/Dropbox/Documents). " +
-                        "Call recordings will sync to that service.");
-                }
-                config.OutputRoot = cleared ? null : Path.GetFullPath(value);
-                break;
-            case "keepaudio":
-                config.KeepAudio = cleared || bool.Parse(value);
-                break;
-            case "coachenabled":
-                config.CoachEnabled = !cleared && bool.Parse(value);
-                break;
-            case "ollamaurl":
-                config.OllamaUrl = cleared ? "http://localhost:11434" : value;
-                break;
-            case "fastmodel":
-                config.FastModel = cleared ? "qwen3:4b" : value;
-                break;
-            case "reasoningmodel":
-                config.ReasoningModel = cleared ? "llama3.1:8b" : value;
-                break;
-            case "embedmodel":
-                config.EmbedModel = cleared ? "nomic-embed-text" : value;
-                break;
-            case "coachrecallmaxdistance":
-                config.CoachRecallMaxDistance = cleared ? 0.35 : double.Parse(value);
-                break;
-            case "postgresconn":
-                config.PostgresConn = cleared
-                    ? "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres"
-                    : value;
-                break;
-            case "speakeridenabled":
-                config.SpeakerIdEnabled = !cleared && bool.Parse(value);
-                break;
-            case "diarizeaftermeeting":
-                config.DiarizeAfterMeeting = cleared || bool.Parse(value);
-                break;
-            case "voiceprintmaxdistance":
-                config.VoiceprintMaxDistance = cleared ? 0.30 : double.Parse(value);
-                break;
-            case "speakersegmodel":
-                config.SpeakerSegModel = cleared ? "sherpa-onnx-pyannote-segmentation-3-0.onnx" : value;
-                break;
-            case "speakerembedmodel":
-                config.SpeakerEmbedModel = cleared ? "nemo_en_titanet_small.onnx" : value;
-                break;
-            case "selfspeakername":
-                config.SelfSpeakerName = cleared ? null : value;
-                break;
-            case "selfmatchmaxdistance":
-                config.SelfMatchMaxDistance = cleared ? 0.6 : double.Parse(value);
-                break;
-            case "diarizationclusterthreshold":
-                config.DiarizationClusterThreshold = cleared ? 0.75f : float.Parse(value);
-                break;
-            case "diarizationminclusterseconds":
-                config.DiarizationMinClusterSeconds = cleared ? 8.0 : double.Parse(value);
-                break;
-            case "sessionmergedistance":
-                config.SessionMergeDistance = cleared ? 0.70 : double.Parse(value);
-                break;
-            case "liveminspeakerseconds":
-                config.LiveMinSpeakerSeconds = cleared ? 1.5 : double.Parse(value);
-                break;
-            default:
-                AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");
-                return 1;
+            AnsiConsole.MarkupLine($"[red]Unknown setting '{key.EscapeMarkup()}'.[/]");
+            return 1;
         }
 
+        var config = AppConfig.Load();
+        var cleared = string.IsNullOrWhiteSpace(value);
+        setting.Apply(config, cleared ? null : value);
         config.Save();
-        AnsiConsole.MarkupLine($"[green]Saved.[/] {key} = {(cleared ? "(default)" : value.EscapeMarkup())}");
+
+        AnsiConsole.MarkupLine($"[green]Saved.[/] {setting.Key} = {(cleared ? "(default)" : value.EscapeMarkup())}");
         return 0;
     }
 

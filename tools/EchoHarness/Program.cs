@@ -156,7 +156,7 @@ async Task<RunResult> RunOneAsync(float level)
     var meCaptions = new List<string>();
 
     var stem = $"echo-harness-{(int)Math.Round(level * 100)}";
-    using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config, useAec);
+    using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config, useAec, aecSuppressionLevel: 1);
     using var captions = new LiveCaptionEngine(modelPath);
     captions.CaptionEmitted += ev =>
     {

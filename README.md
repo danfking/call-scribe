@@ -27,9 +27,9 @@ call-scribe devices                    # list audio devices
 call-scribe config                     # show settings
 ```
 
-`listen` shows fast-preview captions from a small model (base.en by default) while recording; the accurate transcript is still produced by the full model when you stop.
+`listen` shows fast-preview captions from a small model (small.en by default) while recording; the accurate transcript is still produced by the full model when you stop.
 
-Transcripts land in `Documents\call-scribe\transcripts\` as markdown with wall-clock timestamps and YAML frontmatter.
+Transcripts land in `%USERPROFILE%\call-scribe\transcripts\` as markdown with wall-clock timestamps and YAML frontmatter.
 
 ## Requirements
 
