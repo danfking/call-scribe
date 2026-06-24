@@ -7,7 +7,8 @@ public static class TranscriptQa
 {
     public const string SystemPrompt =
         "You answer a question about a live meeting transcript. Use ONLY the transcript provided; if "
-        + "the answer is not in it, say you do not know. Be concise: 1 to 3 sentences, no preamble.";
+        + "the answer is not in it, say you do not know. Answer in one short sentence: no preamble, no "
+        + "reasoning, no restating the question, just the answer.";
 
     public static string BuildUserPrompt(string question, string transcript) =>
         $"Transcript so far:\n{transcript}\n\nQuestion: {question}";

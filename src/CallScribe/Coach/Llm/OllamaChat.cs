@@ -65,7 +65,17 @@ public sealed partial class OllamaChat : ICoachChat
         return StripThink(content).Trim();
     }
 
-    private static string StripThink(string text) => ThinkBlock().Replace(text, "").Trim();
+    /// <summary>Remove a thinking model's reasoning, keeping only the answer. With thinking disabled
+    /// (qwen3) the opening &lt;think&gt; tag is often missing while a closing &lt;/think&gt; remains, so a
+    /// balanced-tag regex alone leaves the reasoning in. The answer always follows the final
+    /// &lt;/think&gt;, so drop everything up to and including it, then strip any balanced block that
+    /// somehow remains.</summary>
+    internal static string StripThink(string text)
+    {
+        var close = text.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+        if (close >= 0) text = text[(close + "</think>".Length)..];
+        return ThinkBlock().Replace(text, "").Trim();
+    }
 
     [GeneratedRegex(@"<think>.*?</think>", RegexOptions.Singleline)]
     private static partial Regex ThinkBlock();
