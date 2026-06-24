@@ -163,6 +163,8 @@ public static class CoachCommand
 
     private static async Task<int> EnrollMeAsync(string name, CancellationToken ct)
     {
+        if (LiveCaptureGuard.Unavailable()) return 1;
+
         var config = AppConfig.Load();
         var opened = await OpenVoiceprintsAsync(config, ct).ConfigureAwait(false);
         if (opened == null) return 1;

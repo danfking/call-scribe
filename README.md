@@ -37,6 +37,17 @@ Transcripts land in `%USERPROFILE%\call-scribe\transcripts\` as markdown with wa
 - The Whisper model (~874 MB) downloads automatically on first transcription.
 - GPU acceleration (optional): download the CUDA build and have the NVIDIA CUDA Toolkit (12.4+) installed. The CPU build transcribes a one-hour call in a few minutes on a modern CPU; the CUDA build does it in seconds. The CUDA build falls back to CPU automatically if no usable GPU is found.
 
+## Running the offline pipeline in Docker (Linux/macOS)
+
+Live capture is Windows-only (WASAPI loopback and the COM echo-cancellation DSP have no portable equivalent), but everything downstream of a recording is platform-neutral. A multi-arch image (linux/amd64 + linux/arm64) runs the offline half: `transcribe`, offline diarization and speaker attribution, and the coach with its memory store. The split is: record on a Windows host, then transcribe and coach anywhere.
+
+```
+docker compose -f docker/callscribe.compose.yml up -d coach-db ollama
+docker compose -f docker/callscribe.compose.yml run --rm app transcribe
+```
+
+The container does transcribe / diarize / coach / memory; it cannot do live host capture (`record`, `listen`, `devices`, `coach enroll-me` report that capture is Windows-only). See [docker/README.md](docker/README.md) for the full setup.
+
 ## The sharp edges
 
 - The loopback capture records the **default output device**. If you take calls on a headset, make the headset your Windows default output before recording, and don't switch output devices mid-call.

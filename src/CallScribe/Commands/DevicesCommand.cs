@@ -1,5 +1,5 @@
 using System.CommandLine;
-using NAudio.CoreAudioApi;
+using CallScribe.Audio;
 using Spectre.Console;
 
 namespace CallScribe.Commands;
@@ -11,31 +11,29 @@ public static class DevicesCommand
         var command = new Command("devices", "List audio devices and show which ones recording will use");
         command.SetAction(_ =>
         {
-            using var enumerator = new MMDeviceEnumerator();
-            var defaultRender = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Communications);
-            var defaultCapture = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            if (LiveCaptureGuard.Unavailable()) return 1;
+
+            var devices = CaptureBackend.Current.ListDevices();
 
             var table = new Table().Border(TableBorder.Rounded);
             table.AddColumn("Type");
             table.AddColumn("Device");
             table.AddColumn("Used as");
 
-            foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+            foreach (var device in devices.Outputs)
             {
-                var isDefault = device.ID == defaultRender.ID;
                 table.AddRow(
                     "Output",
-                    device.FriendlyName,
-                    isDefault ? "[green]Others track (loopback)[/]" : "");
+                    device.Name,
+                    device.IsDefault ? "[green]Others track (loopback)[/]" : "");
             }
 
-            foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+            foreach (var device in devices.Inputs)
             {
-                var isDefault = device.ID == defaultCapture.ID;
                 table.AddRow(
                     "Input",
-                    device.FriendlyName,
-                    isDefault ? "[green]Me track (microphone)[/]" : "");
+                    device.Name,
+                    device.IsDefault ? "[green]Me track (microphone)[/]" : "");
             }
 
             AnsiConsole.Write(table);

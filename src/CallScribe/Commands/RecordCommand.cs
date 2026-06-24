@@ -67,6 +67,7 @@ public static class RecordCommand
 
     private static async Task<int> RunForegroundAsync(string? label, int? seconds, bool noTranscribe, CancellationToken ct)
     {
+        if (LiveCaptureGuard.Unavailable()) return 1;
         if (IsRecordingInProgress())
         {
             AnsiConsole.MarkupLine("[red]A detached recording is already in progress. Stop it first.[/]");
@@ -117,6 +118,7 @@ public static class RecordCommand
 
     private static int StartDetached(string? label)
     {
+        if (LiveCaptureGuard.Unavailable()) return 1;
         if (IsRecordingInProgress())
         {
             AnsiConsole.MarkupLine("[red]A recording is already in progress. Stop it first.[/]");
@@ -154,6 +156,7 @@ public static class RecordCommand
 
     private static async Task<int> RunDetachedWorkerAsync(string stem, CancellationToken ct)
     {
+        if (LiveCaptureGuard.Unavailable()) return 1;
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, AppConfig.Load());
         engine.Start();
         try

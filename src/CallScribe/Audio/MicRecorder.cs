@@ -1,19 +1,16 @@
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace CallScribe.Audio;
 
-/// <summary>Records a short fixed-length clip from the configured microphone to a temp WAV,
-/// for one-off voice enrollment (<c>coach enroll-me</c>). Reuses CaptureEngine's device
-/// resolution so it captures the same mic a real session would. The WAV is in the device's
-/// native format; callers resample it (e.g. SpeakerAudio.ReadWav16kMono).</summary>
+/// <summary>Records a short fixed-length clip from the configured microphone to a temp WAV, for
+/// one-off voice enrollment (<c>coach enroll-me</c>). The device open goes through the platform
+/// <see cref="CaptureBackend"/> so it captures the same mic a real session would; the WAV is in the
+/// device's native format and callers resample it (e.g. SpeakerAudio.ReadWav16kMono).</summary>
 public static class MicRecorder
 {
     public static async Task<string> RecordToTempWavAsync(AppConfig config, TimeSpan duration, CancellationToken ct)
     {
-        using var enumerator = new MMDeviceEnumerator();
-        using var mic = CaptureEngine.ResolveDevice(enumerator, DataFlow.Capture, config.MicDevice);
-        using var capture = new WasapiCapture(mic);
+        using var capture = CaptureBackend.Current.OpenMic(config);
 
         var path = Path.Combine(Path.GetTempPath(), $"call-scribe-enroll-{Guid.NewGuid():N}.wav");
         using var writer = new WaveFileWriter(path, capture.WaveFormat);
