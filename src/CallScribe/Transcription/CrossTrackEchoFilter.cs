@@ -24,7 +24,7 @@ public sealed class CrossTrackEchoFilter(double similarityThreshold = 0.6)
 
     public void Record(string track, string text, DateTime spanStart, DateTime spanEnd)
     {
-        var tokens = Tokenize(text);
+        var tokens = TokenOverlap.Tokenize(text);
         if (tokens.Count == 0) return;
         lock (_lock)
         {
@@ -35,7 +35,7 @@ public sealed class CrossTrackEchoFilter(double similarityThreshold = 0.6)
 
     public bool IsEchoOfOtherTrack(string track, string text, DateTime spanStart, DateTime spanEnd)
     {
-        var tokens = Tokenize(text);
+        var tokens = TokenOverlap.Tokenize(text);
         if (tokens.Count == 0) return false;
         lock (_lock)
         {
@@ -43,7 +43,7 @@ public sealed class CrossTrackEchoFilter(double similarityThreshold = 0.6)
             return _recent.Any(entry =>
                 entry.Track != track &&
                 SpansOverlap(entry, spanStart, spanEnd) &&
-                OverlapCoefficient(tokens, entry.Tokens) >= similarityThreshold);
+                TokenOverlap.OverlapCoefficient(tokens, entry.Tokens, MinTokensForMatch) >= similarityThreshold);
         }
     }
 
@@ -51,18 +51,4 @@ public sealed class CrossTrackEchoFilter(double similarityThreshold = 0.6)
         entry.SpanStart - SpanSlack < spanEnd && spanStart < entry.SpanEnd + SpanSlack;
 
     private void Prune(DateTime now) => _recent.RemoveAll(entry => now - entry.SpanEnd > RetentionWindow);
-
-    private static double OverlapCoefficient(HashSet<string> a, HashSet<string> b)
-    {
-        var smaller = Math.Min(a.Count, b.Count);
-        if (smaller < MinTokensForMatch) return 0;
-        var intersection = a.Count <= b.Count ? a.Count(b.Contains) : b.Count(a.Contains);
-        return (double)intersection / smaller;
-    }
-
-    private static HashSet<string> Tokenize(string text) =>
-        text.ToLowerInvariant()
-            .Split([' ', '\t', '\n', '\r', '.', ',', '?', '!', ';', ':', '"', '(', ')', '[', ']', '-'],
-                StringSplitOptions.RemoveEmptyEntries)
-            .ToHashSet();
 }

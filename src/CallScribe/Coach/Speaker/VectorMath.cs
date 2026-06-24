@@ -32,6 +32,27 @@ public static class VectorMath
     public static float[] RunningMean(ReadOnlySpan<float> centroid, int count, ReadOnlySpan<float> sample) =>
         WeightedMean(centroid, count, sample, 1);
 
+    /// <summary>Element-wise mean of a sequence of equal-length vectors, accumulated in double so a
+    /// large cluster does not lose precision. Zero-length vectors are skipped (un-embeddable turns);
+    /// an empty or all-skipped sequence yields an empty array.</summary>
+    public static float[] Mean(IEnumerable<float[]> vectors)
+    {
+        double[]? sum = null;
+        var count = 0;
+        foreach (var v in vectors)
+        {
+            if (v.Length == 0) continue;
+            sum ??= new double[v.Length];
+            for (var i = 0; i < sum.Length; i++) sum[i] += v[i];
+            count++;
+        }
+        if (sum == null) return [];
+
+        var result = new float[sum.Length];
+        for (var i = 0; i < result.Length; i++) result[i] = (float)(sum[i] / count);
+        return result;
+    }
+
     /// <summary>Weighted mean of two centroids, each standing for <paramref name="countA"/> /
     /// <paramref name="countB"/> averaged samples. Used to fold one speaker cluster into another.
     /// Accumulates in double so a long-running centroid does not lose precision. Returns a new array.</summary>

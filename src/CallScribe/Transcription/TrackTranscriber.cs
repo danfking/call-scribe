@@ -12,7 +12,6 @@ public sealed class TrackTranscriber : IDisposable
 {
     private const int SampleRate = 16000;
     private const int BytesPerSample = 2;
-    private const int WavHeaderProbeBytes = 44; // not used for offsets; WaveFileReader handles framing
 
     private static readonly TimeSpan VadPadding = TimeSpan.FromSeconds(0.25);
     private static readonly TimeSpan VadMergeGap = TimeSpan.FromSeconds(1.0);

@@ -16,47 +16,15 @@ public static class TranscriptMerger
         string stem, TrackTranscript others, TrackTranscript me, string outputDir,
         Func<TranscriptSegment, string>? othersSpeaker = null, string meSpeaker = "Me")
     {
-        Directory.CreateDirectory(outputDir);
-
-        var merged = others.Segments.Select(s => (Speaker: othersSpeaker?.Invoke(s) ?? "Others", Segment: s))
+        var start = ParseStart(stem);
+        var lines = others.Segments.Select(s => (Speaker: othersSpeaker?.Invoke(s) ?? "Others", Segment: s))
             .Concat(me.Segments.Select(s => (Speaker: meSpeaker, Segment: s)))
             .OrderBy(x => x.Segment.Start)
+            .Select(x => (x.Speaker, x.Segment.Text, Stamp: StampOffset(start, x.Segment.Start)))
             .ToList();
 
         var duration = TimeSpan.FromSeconds(Math.Max(others.Duration, me.Duration));
-        var start = ParseStart(stem);
-
-        var sb = new StringBuilder();
-        sb.AppendLine("---");
-        sb.AppendLine($"started: {(start is { } s0 ? s0.ToString("yyyy-MM-dd HH:mm") : stem.Length >= 10 ? stem[..10] : stem)}");
-        sb.AppendLine($"label: {(stem.Length > 16 ? stem[16..] : "")}");
-        sb.AppendLine($"duration: {FormatElapsed(duration)}");
-        sb.AppendLine($"generated: {DateTime.Now:yyyy-MM-dd}");
-        sb.AppendLine("---");
-        sb.AppendLine();
-        sb.AppendLine($"# Call transcript: {stem}");
-        sb.AppendLine();
-
-        string? currentSpeaker = null;
-        foreach (var (speaker, segment) in merged)
-        {
-            if (string.IsNullOrWhiteSpace(segment.Text)) continue;
-            if (speaker != currentSpeaker)
-            {
-                var offset = TimeSpan.FromSeconds(segment.Start);
-                var stamp = start is { } s
-                    ? (s + offset).ToString("HH:mm:ss")
-                    : FormatElapsed(offset);
-                sb.AppendLine();
-                sb.AppendLine($"**{speaker}** [{stamp}]");
-                currentSpeaker = speaker;
-            }
-            sb.AppendLine(segment.Text);
-        }
-
-        var outputPath = Path.Combine(outputDir, $"{stem}.md");
-        File.WriteAllText(outputPath, sb.ToString());
-        return outputPath;
+        return Write(stem, outputDir, duration, source: null, lines);
     }
 
     /// <summary>Write the live transcript (the per-chunk captions persisted to the coach DB during
@@ -72,42 +40,64 @@ public static class TranscriptMerger
         string stem, IReadOnlyList<(DateTime At, string Speaker, string Text)> lines, string outputDir,
         TimeSpan? duration = null)
     {
-        Directory.CreateDirectory(outputDir);
-
         var ordered = lines.OrderBy(l => l.At).ToList();
-        var start = ParseStart(stem);
         var elapsed = duration ?? (ordered.Count > 0
             ? TimeSpan.FromSeconds(Math.Max(0, (ordered[^1].At - ordered[0].At).TotalSeconds))
             : TimeSpan.Zero);
+
+        var stamped = ordered
+            .Select(l => (l.Speaker, l.Text, Stamp: l.At.ToLocalTime().ToString("HH:mm:ss")))
+            .ToList();
+        return Write(stem, outputDir, elapsed, source: "live", stamped);
+    }
+
+    /// <summary>Shared writer for both transcripts: the YAML frontmatter block plus the speaker-grouped
+    /// body, where consecutive same-speaker lines share one stamped header. Each line arrives already
+    /// stamped because the batch path stamps from per-segment offsets and the live path from wall-clock
+    /// times. <paramref name="source"/>, when set, adds a frontmatter marker (e.g. "live").</summary>
+    private static string Write(
+        string stem, string outputDir, TimeSpan duration, string? source,
+        IReadOnlyList<(string Speaker, string Text, string Stamp)> lines)
+    {
+        Directory.CreateDirectory(outputDir);
+        var start = ParseStart(stem);
 
         var sb = new StringBuilder();
         sb.AppendLine("---");
         sb.AppendLine($"started: {(start is { } s0 ? s0.ToString("yyyy-MM-dd HH:mm") : stem.Length >= 10 ? stem[..10] : stem)}");
         sb.AppendLine($"label: {(stem.Length > 16 ? stem[16..] : "")}");
-        sb.AppendLine($"duration: {FormatElapsed(elapsed)}");
+        sb.AppendLine($"duration: {FormatElapsed(duration)}");
         sb.AppendLine($"generated: {DateTime.Now:yyyy-MM-dd}");
-        sb.AppendLine("source: live"); // distinguishes from the full-quality batch ("final") transcript
+        if (source != null) sb.AppendLine($"source: {source}");
         sb.AppendLine("---");
         sb.AppendLine();
         sb.AppendLine($"# Call transcript: {stem}");
         sb.AppendLine();
 
         string? currentSpeaker = null;
-        foreach (var line in ordered)
+        foreach (var (speaker, text, stamp) in lines)
         {
-            if (string.IsNullOrWhiteSpace(line.Text)) continue;
-            if (line.Speaker != currentSpeaker)
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            if (speaker != currentSpeaker)
             {
                 sb.AppendLine();
-                sb.AppendLine($"**{line.Speaker}** [{line.At.ToLocalTime():HH:mm:ss}]");
-                currentSpeaker = line.Speaker;
+                sb.AppendLine($"**{speaker}** [{stamp}]");
+                currentSpeaker = speaker;
             }
-            sb.AppendLine(line.Text);
+            sb.AppendLine(text);
         }
 
         var outputPath = Path.Combine(outputDir, $"{stem}.md");
         File.WriteAllText(outputPath, sb.ToString());
         return outputPath;
+    }
+
+    /// <summary>Wall-clock stamp for a segment at <paramref name="offsetSeconds"/> into the call:
+    /// the meeting start plus the offset, or just the elapsed offset when the stem has no start date.</summary>
+    private static string StampOffset(DateTime? start, double offsetSeconds)
+    {
+        var offset = TimeSpan.FromSeconds(offsetSeconds);
+        return start is { } s ? (s + offset).ToString("HH:mm:ss") : FormatElapsed(offset);
     }
 
     /// <summary>Recording stems start with yyyy-MM-dd-HHmm, written at call start.</summary>

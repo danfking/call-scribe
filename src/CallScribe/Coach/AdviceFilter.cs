@@ -1,3 +1,5 @@
+using CallScribe.Transcription;
+
 namespace CallScribe.Coach;
 
 /// <summary>Suppresses repeated advice. The coach judges each utterance independently,
@@ -15,7 +17,7 @@ public sealed class AdviceFilter(double similarityThreshold = 0.6, TimeSpan? ret
     /// it repeats recent advice or is empty.</summary>
     public bool ShouldEmit(string text, DateTime now)
     {
-        var tokens = Tokenize(text);
+        var tokens = TokenOverlap.Tokenize(text);
         if (tokens.Count == 0) return false;
 
         lock (_lock)
@@ -23,7 +25,7 @@ public sealed class AdviceFilter(double similarityThreshold = 0.6, TimeSpan? ret
             Prune(now);
             foreach (var entry in _recent)
             {
-                if (OverlapCoefficient(tokens, entry.Tokens) >= similarityThreshold) return false;
+                if (TokenOverlap.OverlapCoefficient(tokens, entry.Tokens) >= similarityThreshold) return false;
             }
             _recent.Add((now, tokens));
             return true;
@@ -31,18 +33,4 @@ public sealed class AdviceFilter(double similarityThreshold = 0.6, TimeSpan? ret
     }
 
     private void Prune(DateTime now) => _recent.RemoveAll(entry => now - entry.At > _retention);
-
-    private static double OverlapCoefficient(HashSet<string> a, HashSet<string> b)
-    {
-        var smaller = Math.Min(a.Count, b.Count);
-        if (smaller == 0) return 0;
-        var intersection = a.Count <= b.Count ? a.Count(b.Contains) : b.Count(a.Contains);
-        return (double)intersection / smaller;
-    }
-
-    private static HashSet<string> Tokenize(string text) =>
-        text.ToLowerInvariant()
-            .Split([' ', '\t', '\n', '\r', '.', ',', '?', '!', ';', ':', '"', '(', ')', '[', ']', '-'],
-                StringSplitOptions.RemoveEmptyEntries)
-            .ToHashSet();
 }

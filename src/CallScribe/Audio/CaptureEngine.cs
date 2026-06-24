@@ -15,7 +15,6 @@ public sealed class CaptureEngine : IDisposable
     public CaptureTrack MeTrack => _me;
 
     public string OthersPath { get; }
-    public string MePath { get; }
     public string LoopbackDeviceName { get; }
     public string MicDeviceName { get; }
 
@@ -23,7 +22,7 @@ public sealed class CaptureEngine : IDisposable
     {
         Directory.CreateDirectory(recordingsDir);
         OthersPath = Path.Combine(recordingsDir, $"{stem}.others.wav");
-        MePath = Path.Combine(recordingsDir, $"{stem}.me.wav");
+        var mePath = Path.Combine(recordingsDir, $"{stem}.me.wav");
 
         using var enumerator = new MMDeviceEnumerator();
         var render = ResolveDevice(enumerator, DataFlow.Render, config?.LoopbackDevice);
@@ -47,7 +46,7 @@ public sealed class CaptureEngine : IDisposable
             MicDeviceName = mic.FriendlyName;
             meCapture = new WasapiCapture(mic); // takes ownership of mic
         }
-        _me = new CaptureTrack("Me", meCapture, epoch, MePath);
+        _me = new CaptureTrack("Me", meCapture, epoch, mePath);
 
         epoch.Start();
     }
