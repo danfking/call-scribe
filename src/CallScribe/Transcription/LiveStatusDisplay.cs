@@ -58,7 +58,12 @@ public sealed class LiveStatusDisplay : IDisposable
     // When the coach panel is shown it stacks below the transcript: it shows a small fixed block
     // of recent advice, and the transcript reserves that much vertical space for it.
     private const int CoachAdviceRows = 6;
-    private const int CoachPanelRows = CoachAdviceRows + 4; // advice + activity line + panel chrome
+    private const int CoachPanelRows = CoachAdviceRows + 2; // advice + panel borders (activity is in the border now)
+
+    // Fixed rows the transcript leaves for everything that isn't its own content: the header rule,
+    // its own borders, and the footer. The per-track cards row was removed (status moved into the
+    // transcript border), so this is smaller than before.
+    private const int ChromeRows = 9;
 
     // Width of a transcript line's "HH:mm:ss  label   " prefix, for estimating how many rows a
     // (speaker-coalesced, possibly long) entry wraps to.
@@ -482,10 +487,10 @@ public sealed class LiveStatusDisplay : IDisposable
                 Style = Style.Parse("grey"),
             };
 
-            var cards = new Columns(_order.Select(BuildCard).ToArray()) { Expand = true };
-
+            // Per-track status now lives in the transcript's top border (one icon per track that
+            // changes with its state) instead of a separate cards row, to save vertical space.
             var transcript = new Panel(BuildTranscript())
-                .Header("[grey] transcript [/]")
+                .Header($"[grey] transcript [/]   {TrackIcons()}")
                 .Border(BoxBorder.Rounded)
                 .BorderColor(Color.Grey)
                 .Expand();
@@ -521,8 +526,10 @@ public sealed class LiveStatusDisplay : IDisposable
             else if (_showAdvice)
             {
                 // Activity line, a blank separator, then the advice log — spacing via Rows only.
-                var advice = new Panel(new Rows(BuildCoachActivity(), new Markup(""), BuildAdvice()))
-                    .Header("[magenta] coach [/]")
+                // The coach's activity (thinking / listening / nothing to add) is shown as an icon in
+                // the panel border; the content is just the advice log.
+                var advice = new Panel(BuildAdvice())
+                    .Header($"[magenta] coach [/]{CoachActivityIcon()}")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
                     .Expand();
@@ -531,7 +538,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 body = new Rows(transcript, advice);
             }
 
-            return new Rows(header, cards, body, footer);
+            return new Rows(header, body, footer);
         }
     }
 
@@ -555,21 +562,31 @@ public sealed class LiveStatusDisplay : IDisposable
             .Expand();
     }
 
-    private IRenderable BuildCard((string Label, string Colour) track)
+    /// <summary>Per-track status icons for the transcript's top border: a glyph that changes with
+    /// each track's state, in the track's colour. Replaces the old per-track cards row.</summary>
+    private string TrackIcons()
     {
-        var (glyph, word) = _states.GetValueOrDefault(track.Label) switch
+        var parts = _order.Select(t =>
         {
-            TrackState.Transcribing => ("▶", "transcribing"),
-            TrackState.Hearing => ("◐", "hearing audio"),
-            _ => ("○", "listening"),
-        };
-        var content = new Markup($"  [{track.Colour}]{glyph}[/]  [grey]{word}[/]");
-        return new Panel(content)
-            .Header($"[{track.Colour}] {track.Label} [/]")
-            .Border(BoxBorder.Rounded)
-            .BorderColor(Color.Grey)
-            .Expand();
+            var glyph = _states.GetValueOrDefault(t.Label) switch
+            {
+                TrackState.Transcribing => "▶",
+                TrackState.Hearing => "◐",
+                _ => "○",
+            };
+            // Trailing space kept INSIDE the grey span: Spectre trims trailing whitespace that sits
+            // outside a markup span, so the last icon would otherwise touch the panel border.
+            return $"[{t.Colour}]{glyph}[/] [grey]{t.Label.EscapeMarkup()} [/]";
+        });
+        return string.Join("  ", parts);
     }
+
+    /// <summary>The coach's current activity as a border icon (thinking / listening / nothing to
+    /// add), or empty before the first state is set.</summary>
+    private string CoachActivityIcon() =>
+        // Trailing space inside the span so the text does not touch the panel border (Spectre trims
+        // trailing whitespace that is outside a markup span).
+        _coachActivity is { } a ? $"  [{a.Colour}]{a.Text.EscapeMarkup()} [/]" : "";
 
     /// <summary>The autocomplete dropdown: a short vertical list of candidates with the selected one
     /// highlighted. Windows to the selection when there are more candidates than fit.</summary>
@@ -601,7 +618,7 @@ public sealed class LiveStatusDisplay : IDisposable
         // to several rows; budget by estimated rendered rows (not entry count) so one long turn
         // can't push the footer off screen.
         var reserved = _showAdvice || _answer != null ? CoachPanelRows : 0;
-        var rowBudget = Math.Max(3, SafeWindowHeight() - 12 - reserved);
+        var rowBudget = Math.Max(3, SafeWindowHeight() - ChromeRows - reserved);
         var lineWidth = Math.Max(20, SafeWindowWidth() - 4); // minus panel border/padding
 
         var chosen = new List<Caption>();
@@ -628,12 +645,6 @@ public sealed class LiveStatusDisplay : IDisposable
     /// <summary>Estimated number of wrapped rows for a line of <paramref name="chars"/> visible
     /// characters at <paramref name="lineWidth"/> columns (at least one row).</summary>
     private static int WrappedRows(int chars, int lineWidth) => Math.Max(1, (chars + lineWidth - 1) / lineWidth);
-
-    /// <summary>The coach status line above the advice log: shows what the coach is doing now
-    /// (thinking / listening / considered-nothing-to-add). The text/colour are set by the wiring,
-    /// which seeds the resting "Listening" state up front; blank until then.</summary>
-    private IRenderable BuildCoachActivity() =>
-        _coachActivity is { } a ? new Markup($"[{a.Colour}]{a.Text.EscapeMarkup()}[/]") : new Markup("");
 
     private IRenderable BuildAdvice()
     {
