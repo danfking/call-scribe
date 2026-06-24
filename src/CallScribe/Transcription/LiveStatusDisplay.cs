@@ -490,7 +490,7 @@ public sealed class LiveStatusDisplay : IDisposable
             // Per-track status now lives in the transcript's top border (one icon per track that
             // changes with its state) instead of a separate cards row, to save vertical space.
             var transcript = new Panel(BuildTranscript())
-                .Header($"[grey] transcript [/]   {TrackIcons()}")
+                .Header($"[grey] transcript [/]   {TrackIcons()} ")
                 .Border(BoxBorder.Rounded)
                 .BorderColor(Color.Grey)
                 .Expand();
@@ -529,7 +529,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 // The coach's activity (thinking / listening / nothing to add) is shown as an icon in
                 // the panel border; the content is just the advice log.
                 var advice = new Panel(BuildAdvice())
-                    .Header($"[magenta] coach [/]{CoachActivityIcon()}")
+                    .Header($"[magenta] coach [/]{CoachActivityIcon()} ")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
                     .Expand();
