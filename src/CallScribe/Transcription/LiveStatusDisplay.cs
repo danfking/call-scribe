@@ -490,7 +490,7 @@ public sealed class LiveStatusDisplay : IDisposable
             // Per-track status now lives in the transcript's top border (one icon per track that
             // changes with its state) instead of a separate cards row, to save vertical space.
             var transcript = new Panel(BuildTranscript())
-                .Header($"[grey] transcript [/]   {TrackIcons()} ")
+                .Header($"[grey] transcript [/]   {TrackIcons()}")
                 .Border(BoxBorder.Rounded)
                 .BorderColor(Color.Grey)
                 .Expand();
@@ -529,7 +529,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 // The coach's activity (thinking / listening / nothing to add) is shown as an icon in
                 // the panel border; the content is just the advice log.
                 var advice = new Panel(BuildAdvice())
-                    .Header($"[magenta] coach [/]{CoachActivityIcon()} ")
+                    .Header($"[magenta] coach [/]{CoachActivityIcon()}")
                     .Border(BoxBorder.Rounded)
                     .BorderColor(Color.Grey)
                     .Expand();
@@ -574,15 +574,19 @@ public sealed class LiveStatusDisplay : IDisposable
                 TrackState.Hearing => "◐",
                 _ => "○",
             };
-            return $"[{t.Colour}]{glyph}[/] [grey]{t.Label.EscapeMarkup()}[/]";
+            // Trailing space kept INSIDE the grey span: Spectre trims trailing whitespace that sits
+            // outside a markup span, so the last icon would otherwise touch the panel border.
+            return $"[{t.Colour}]{glyph}[/] [grey]{t.Label.EscapeMarkup()} [/]";
         });
-        return string.Join("   ", parts);
+        return string.Join("  ", parts);
     }
 
     /// <summary>The coach's current activity as a border icon (thinking / listening / nothing to
     /// add), or empty before the first state is set.</summary>
     private string CoachActivityIcon() =>
-        _coachActivity is { } a ? $"  [{a.Colour}]{a.Text.EscapeMarkup()}[/]" : "";
+        // Trailing space inside the span so the text does not touch the panel border (Spectre trims
+        // trailing whitespace that is outside a markup span).
+        _coachActivity is { } a ? $"  [{a.Colour}]{a.Text.EscapeMarkup()} [/]" : "";
 
     /// <summary>The autocomplete dropdown: a short vertical list of candidates with the selected one
     /// highlighted. Windows to the selection when there are more candidates than fit.</summary>
