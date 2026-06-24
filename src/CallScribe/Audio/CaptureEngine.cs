@@ -18,7 +18,7 @@ public sealed class CaptureEngine : IDisposable
     public string LoopbackDeviceName { get; }
     public string MicDeviceName { get; }
 
-    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null, bool aecMic = false, int aecSuppressionLevel = 1)
+    public CaptureEngine(string stem, string recordingsDir, AppConfig? config = null, bool aecMic = false, int aecSuppressionLevel = 0)
     {
         Directory.CreateDirectory(recordingsDir);
         OthersPath = Path.Combine(recordingsDir, $"{stem}.others.wav");

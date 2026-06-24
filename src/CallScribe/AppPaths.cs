@@ -1,7 +1,8 @@
 namespace CallScribe;
 
-/// <summary>Well-known directories. Models and state live under LocalAppData;
-/// recordings and transcripts under Documents where the user can find them.</summary>
+/// <summary>Well-known directories. Models and state live under LocalAppData; recordings and
+/// transcripts under %USERPROFILE%\call-scribe (NOT Documents, which is commonly synced) unless
+/// the user overrides the output root.</summary>
 public static class AppPaths
 {
     public static string DataDir =>
