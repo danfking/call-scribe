@@ -164,27 +164,8 @@ public static class OfflineDiarization
         return (result, means);
     }
 
-    /// <summary>Average the embeddings of a cluster's turns into a single voiceprint.</summary>
-    private static float[] MeanEmbedding(ISpeakerEmbedder embedder, float[] samples, IEnumerable<DiarizedSegment> turns)
-    {
-        float[]? sum = null;
-        var count = 0;
-        foreach (var turn in turns)
-        {
-            var embedding = embedder.Embed(SpeakerAudio.Slice(samples, turn.Start, turn.End));
-            if (embedding.Length == 0) continue;
-            if (sum == null)
-            {
-                sum = (float[])embedding.Clone();
-            }
-            else
-            {
-                for (var i = 0; i < sum.Length; i++) sum[i] += embedding[i];
-            }
-            count++;
-        }
-        if (sum == null) return [];
-        for (var i = 0; i < sum.Length; i++) sum[i] /= count;
-        return sum;
-    }
+    /// <summary>Average the embeddings of a cluster's turns into a single voiceprint
+    /// (un-embeddable turns are skipped by <see cref="VectorMath.Mean"/>).</summary>
+    private static float[] MeanEmbedding(ISpeakerEmbedder embedder, float[] samples, IEnumerable<DiarizedSegment> turns) =>
+        VectorMath.Mean(turns.Select(turn => embedder.Embed(SpeakerAudio.Slice(samples, turn.Start, turn.End))));
 }
