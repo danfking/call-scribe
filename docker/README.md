@@ -67,4 +67,4 @@ The `app` service is in the `app` compose profile and has no default command: it
 
 - The image uses a glibc Debian base (`mcr.microsoft.com/dotnet/runtime`), not Alpine: the whisper and onnxruntime native libraries link against glibc.
 - `libgomp1` is installed for the OpenMP runtime those natives expect.
-- linux/arm64 native presence for Whisper.net.Runtime 1.9.1 and sherpa-onnx 1.13.3 is expected per their published runtime assets but has not been exercised on real arm64 hardware here; if a native fails to load on arm64, that is the first thing to check.
+- linux/arm64: the image builds under `buildx`, the arm64 native libraries are present (Whisper.net.Runtime ships `runtimes/linux-arm64/libwhisper.so` plus the ggml libs; sherpa-onnx ships the arm64 `libonnxruntime.so` and `libsherpa-onnx-c-api.so`), and the .NET app runs under QEMU emulation (`config` works). Full transcription was verified only on linux/amd64; on arm64 it was not run to completion here because QEMU emulation is too slow, not because of any architecture problem. Expect it to work on real arm64 hardware (e.g. Apple Silicon); if a native fails to load there, that is the first thing to check.
