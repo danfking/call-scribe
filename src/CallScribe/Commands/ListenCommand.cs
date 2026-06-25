@@ -86,6 +86,8 @@ public static class ListenCommand
 
     private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool liveOnly, bool aec, int aes, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
+        if (LiveCaptureGuard.Unavailable()) return 1;
+
         var config = AppConfig.Load();
         // --speakers turns identification on for this run, including the after-meeting pass.
         if (speakersFlag) config.SpeakerIdEnabled = true;

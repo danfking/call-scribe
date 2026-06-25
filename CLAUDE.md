@@ -14,8 +14,14 @@ dotnet test tests/CallScribe.Tests --filter "FullyQualifiedName~SpeakerResolverT
 
 - `Directory.Build.props` sets `TreatWarningsAsErrors=true` for every project, so any warning
   (including the platform-compatibility analyzer over the WASAPI/COM audio code) fails the build.
-- Everything targets `net10.0-windows`. The CPU build is the headline; CUDA is opt-in only via the
-  `CallScribeCuda=true` publish property (it balloons the artifact).
+- `src/CallScribe` multi-targets `net10.0;net10.0-windows`. `net10.0-windows` is the headline build
+  (live capture). `net10.0` is the portable build for the Docker image: it does everything downstream
+  of a WAV (transcribe, diarize, coach) and stubs out live capture. Because of the CA1416 analyzer
+  under `TreatWarningsAsErrors`, the Windows-only audio files (`WindowsCaptureBackend`,
+  `VoiceCaptureAec*`) are `Compile Remove`d from the `net10.0` compile, not merely runtime-guarded.
+  Build the portable target with `dotnet build src/CallScribe -f net10.0` to catch platform leaks.
+  CUDA is opt-in only via the `CallScribeCuda=true` publish property (it balloons the artifact).
+  The tools and tests are `net10.0-windows` and resolve that TFM of the dependency automatically.
 
 ## Architecture
 
@@ -28,7 +34,11 @@ Audio, Transcription do NOT depend on Coach.
 ```
 
 - **Audio** (`CaptureEngine`, `CaptureTrack`): two WASAPI captures (loopback + mic) into two WAVs.
-  The two-track split is what gives exact speaker separation, the near side is never diarized.
+  The two-track split is what gives exact speaker separation, the near side is never diarized. Live
+  capture sits behind the `ICaptureBackend` seam (`CaptureBackend.Current`): `WindowsCaptureBackend`
+  (WASAPI/AEC, Windows-only file) or `UnsupportedCaptureBackend` (portable build). The live commands
+  (`record`, `listen`, `devices`, `coach enroll-me`) check `CaptureBackend.SupportsLiveCapture` and
+  degrade with a clear message off-Windows.
 - **Transcription**: live captions (`LiveCaptionEngine` + `LiveStatusDisplay` dashboard, small model,
   fixed audio-window chunking) vs the stop-time batch pass (`TranscriptionService`, large model + VAD,
   `TranscriptMerger` writes the `.md`).

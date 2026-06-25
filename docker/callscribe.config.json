@@ -1,0 +1,4 @@
+{
+  "ollamaUrl": "http://ollama:11434",
+  "postgresConn": "Host=coach-db;Port=5432;Database=callscribe;Username=postgres;Password=postgres"
+}

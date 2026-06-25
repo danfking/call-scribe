@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Threading.Channels;
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace CallScribe.Audio;

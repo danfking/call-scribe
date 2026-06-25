@@ -1,0 +1,12 @@
+# Keep the build context small: only src/ and Directory.Build.props are copied by the Dockerfile.
+**/bin/
+**/obj/
+.git/
+.github/
+.vs/
+tools/
+tests/
+docker/data/
+docs/
+*.md
+*.user
