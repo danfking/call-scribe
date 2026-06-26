@@ -77,9 +77,9 @@ public static class ConfigCommand
             (c, v) => c.PostgresConn = v
                 ?? "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres"),
 
-        new("coachingProfilesEnabled", () => "false",
+        new("coachingProfilesEnabled", () => "true",
             c => c.CoachingProfilesEnabled.ToString().ToLowerInvariant(),
-            (c, v) => c.CoachingProfilesEnabled = v != null && bool.Parse(v), StartsGroup: true),
+            (c, v) => c.CoachingProfilesEnabled = v == null || bool.Parse(v), StartsGroup: true),
         new("coachingProfilesDir", () => AppPaths.CoachingDir.EscapeMarkup(),
             c => c.CoachingProfilesDir?.EscapeMarkup() ?? "[grey](default)[/]",
             (c, v) =>

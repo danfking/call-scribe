@@ -93,9 +93,10 @@ public sealed class AppConfig
         "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres";
 
     /// <summary>Keep a per-person markdown coaching profile that the coach uses to tailor advice to
-    /// whoever is in the call, refreshed automatically at the end of each meeting. Off by default.</summary>
+    /// whoever is in the call, refreshed automatically at the end of each meeting. On by default, but
+    /// only does anything while the coach itself is running (listen --coach / coach replay).</summary>
     [JsonPropertyName("coachingProfilesEnabled")]
-    public bool CoachingProfilesEnabled { get; set; }
+    public bool CoachingProfilesEnabled { get; set; } = true;
 
     /// <summary>Where the per-person profile markdown lives. Null uses AppPaths.CoachingDir
     /// (under the output root, deliberately not a synced folder).</summary>
