@@ -17,9 +17,10 @@ public sealed class LlmAdvisor : IAdvisor
     private const int ContextLines = 8;
 
     // Person-aware coaching: how many of the most-recently-active named people to inject profiles
-    // for, and a defensive per-person size cap so a long profile cannot crowd out the transcript.
+    // for, and a per-person size cap. The cap matches the updater's ~250-word target with headroom, so
+    // a normal profile passes whole and truncation only ever trims an oversized hand-edited file.
     private const int MaxProfiles = 3;
-    private const int MaxProfileChars = 600;
+    private const int MaxProfileChars = 1600;
 
     private static readonly string SystemPrompt =
         """

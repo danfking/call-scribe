@@ -273,6 +273,26 @@ public class LlmAdvisorTests
     }
 
     [Fact]
+    public async Task ProfileUnderCap_IsInjectedWhole()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            // A normal profile (well under MaxProfileChars) must reach the model intact, tail included.
+            var body = string.Join("\n", Enumerable.Range(0, 40).Select(i => $"- note {i}"));
+            store.Write("Gavin", "# Gavin\n" + body + "\nENDMARKER");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store);
+
+            await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+
+            Assert.Contains("ENDMARKER", chat.LastUser);
+            Assert.DoesNotContain("…", chat.LastUser);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public async Task LongProfile_IsTruncated()
     {
         var (store, dir) = NewStore();

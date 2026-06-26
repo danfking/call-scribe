@@ -83,7 +83,10 @@ public sealed class CoachingProfileUpdater
                 var raw = await _chat.CompleteAsync(_model, SystemPrompt, user, jsonMode: false, maxTokens: 2048, ct)
                     .ConfigureAwait(false);
                 var markdown = CleanMarkdown(raw);
-                if (!string.IsNullOrWhiteSpace(markdown))
+                // Only overwrite with something that actually looks like a profile (starts with the
+                // markdown heading the prompt asks for). A refusal or stray prose must never clobber a
+                // good, possibly hand-edited, existing profile.
+                if (markdown.StartsWith('#'))
                 {
                     _profiles.Write(person, markdown);
                     updated++;

@@ -112,6 +112,26 @@ public class CoachingProfileUpdaterTests
     }
 
     [Fact]
+    public async Task RefusalReply_DoesNotOverwriteExistingProfile()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            store.Write("Gavin", "# Gavin\nGood existing notes.\n");
+            var memory = new FakeTranscript(new TranscriptLine(T0, "Gavin", "Hello."));
+            // A reply that is not a profile (no leading heading) must not clobber the good file.
+            var chat = new CannedChat("I'm sorry, I don't have enough information to build a profile.");
+            var updater = new CoachingProfileUpdater(chat, "llama3.1:8b", memory, store, selfName: null);
+
+            var count = await updater.UpdateAsync("m1", CancellationToken.None);
+
+            Assert.Equal(0, count);
+            Assert.Equal("# Gavin\nGood existing notes.", store.Read("Gavin")!.Trim());
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public async Task StripsWrappingCodeFence()
     {
         var (store, dir) = NewStore();

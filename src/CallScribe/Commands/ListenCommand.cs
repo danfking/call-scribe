@@ -230,18 +230,22 @@ public static class ListenCommand
                 }
                 catch { /* consolidation is best-effort; never block the transcript */ }
             }
-            if (coachMemory != null && wantCoachPanel && config.CoachingProfilesEnabled)
+            if (coachMemory != null && wantCoachPanel && config.CoachingProfilesEnabled && config.SpeakerIdEnabled)
             {
-                // Refine each named person's coaching profile from this meeting. Runs after the
-                // relabel above so it uses the final speaker names, and on a fresh token like the
-                // consolidation: a stop must not abort the write.
+                // Refine each named person's coaching profile from this meeting. Gated on speaker-id:
+                // without it the far side is never named, so there is nobody to profile and no reason
+                // to round-trip the DB. Runs after the live relabel above so it sees the consolidated
+                // live names, and on a fresh token like the consolidation: a stop must not abort the write.
                 try
                 {
                     var updater = CoachFactory.TryCreateProfileUpdater(config, coachMemory);
                     if (updater != null)
                     {
                         var updatedProfiles = await updater.UpdateAsync(stem, CancellationToken.None).ConfigureAwait(false);
-                        AnsiConsole.MarkupLine($"[grey]Updated {updatedProfiles} coaching profile(s).[/]");
+                        if (updatedProfiles > 0)
+                        {
+                            AnsiConsole.MarkupLine($"[grey]Updated {updatedProfiles} coaching profile(s).[/]");
+                        }
                     }
                 }
                 catch { /* best-effort; never block the transcript */ }
