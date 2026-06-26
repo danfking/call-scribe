@@ -118,7 +118,8 @@ public static class ListenCommand
             if (wantCoachPanel || liveOnly)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory);
+                var profileStore = CoachFactory.CreateProfileStore(config);
+                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory, profileStore);
                 coach = new CoachEngine(advisor, coachMemory, stem);
                 if (wantCoachPanel)
                 {
@@ -228,6 +229,22 @@ public static class ListenCommand
                     AnsiConsole.MarkupLine($"[grey]Coach stored {stored} memories from this meeting.[/]");
                 }
                 catch { /* consolidation is best-effort; never block the transcript */ }
+            }
+            if (coachMemory != null && wantCoachPanel && config.CoachingProfilesEnabled)
+            {
+                // Refine each named person's coaching profile from this meeting. Runs after the
+                // relabel above so it uses the final speaker names, and on a fresh token like the
+                // consolidation: a stop must not abort the write.
+                try
+                {
+                    var updater = CoachFactory.TryCreateProfileUpdater(config, coachMemory);
+                    if (updater != null)
+                    {
+                        var updatedProfiles = await updater.UpdateAsync(stem, CancellationToken.None).ConfigureAwait(false);
+                        AnsiConsole.MarkupLine($"[grey]Updated {updatedProfiles} coaching profile(s).[/]");
+                    }
+                }
+                catch { /* best-effort; never block the transcript */ }
             }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
 

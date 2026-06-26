@@ -77,6 +77,22 @@ public static class ConfigCommand
             (c, v) => c.PostgresConn = v
                 ?? "Host=localhost;Port=5432;Database=callscribe;Username=postgres;Password=postgres"),
 
+        new("coachingProfilesEnabled", () => "false",
+            c => c.CoachingProfilesEnabled.ToString().ToLowerInvariant(),
+            (c, v) => c.CoachingProfilesEnabled = v != null && bool.Parse(v), StartsGroup: true),
+        new("coachingProfilesDir", () => AppPaths.CoachingDir.EscapeMarkup(),
+            c => c.CoachingProfilesDir?.EscapeMarkup() ?? "[grey](default)[/]",
+            (c, v) =>
+            {
+                if (v != null && LooksSynced(v))
+                {
+                    AnsiConsole.MarkupLine(
+                        "[yellow]Warning:[/] that path looks like a synced folder (OneDrive/Dropbox/Documents). " +
+                        "Private coaching notes will sync to that service.");
+                }
+                c.CoachingProfilesDir = v == null ? null : Path.GetFullPath(v);
+            }),
+
         new("speakerIdEnabled", () => "false",
             c => c.SpeakerIdEnabled.ToString().ToLowerInvariant(),
             (c, v) => c.SpeakerIdEnabled = v != null && bool.Parse(v), StartsGroup: true),

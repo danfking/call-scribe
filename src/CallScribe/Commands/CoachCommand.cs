@@ -300,7 +300,8 @@ public static class CoachCommand
 
         var config = AppConfig.Load();
         var memory = stub ? null : await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-        var (advisor, usingModel) = CoachFactory.CreateAdvisor(config, forceStub: stub, memory);
+        var profileStore = CoachFactory.CreateProfileStore(config);
+        var (advisor, usingModel) = CoachFactory.CreateAdvisor(config, forceStub: stub, memory, profileStore);
         var meetingId = $"{Path.GetFileNameWithoutExtension(script)}-replay";
 
         using var display = new LiveStatusDisplay();
@@ -322,6 +323,14 @@ public static class CoachCommand
                 new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, memory);
             var stored = await consolidator.ConsolidateAsync(meetingId, ct).ConfigureAwait(false);
             AnsiConsole.MarkupLine($"[green]Consolidated[/] {stored} memories from this meeting.");
+
+            var updater = CoachFactory.TryCreateProfileUpdater(config, memory);
+            if (updater != null)
+            {
+                var updatedProfiles = await updater.UpdateAsync(meetingId, ct).ConfigureAwait(false);
+                AnsiConsole.MarkupLine($"[green]Updated[/] {updatedProfiles} coaching profile(s).");
+            }
+
             await memory.DisposeAsync().ConfigureAwait(false);
         }
         return 0;

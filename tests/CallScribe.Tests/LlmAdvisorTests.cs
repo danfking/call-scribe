@@ -1,6 +1,7 @@
 using CallScribe.Coach;
 using CallScribe.Coach.Llm;
 using CallScribe.Coach.Memory;
+using CallScribe.Coach.Profiles;
 using CallScribe.Transcription;
 
 namespace CallScribe.Tests;
@@ -14,10 +15,14 @@ public class LlmAdvisorTests
     private sealed class CannedChat(string reply) : ICoachChat
     {
         public string? LastUser { get; private set; }
+        public string? LastSystem { get; private set; }
+        public int Calls { get; private set; }
 
         public Task<string> CompleteAsync(string model, string system, string user, bool jsonMode, int maxTokens, CancellationToken ct)
         {
             LastUser = user;
+            LastSystem = system;
+            Calls++;
             return Task.FromResult(reply);
         }
     }
@@ -169,5 +174,127 @@ public class LlmAdvisorTests
 
         Assert.Contains(prior, chat.LastUser);
         Assert.Contains("do not repeat", chat.LastUser, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- Person-aware coaching profiles ---------------------------------------
+
+    private static IReadOnlyList<CaptionEvent> GavinContext() =>
+        [new CaptionEvent(T0, LiveCaptionEngine.OthersLabel, "I'm not sure about this timeline.", "Gavin")];
+
+    [Fact]
+    public async Task NoProfileStore_DoesNotInjectOrSwitchPrompt()
+    {
+        var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+        var advisor = new LlmAdvisor(chat, "qwen3:4b");
+
+        await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+
+        Assert.DoesNotContain("shape HOW you advise", chat.LastUser);
+        Assert.DoesNotContain("navigate the conversation", chat.LastSystem);
+    }
+
+    [Fact]
+    public async Task NamedPersonWithProfile_InjectsSectionAndSelectsCoachingPrompt()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            store.Write("Gavin", "# Gavin\nReacts badly to surprises; flag changes early.\n");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store);
+
+            await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+
+            Assert.Contains("## Gavin", chat.LastUser);
+            Assert.Contains("Reacts badly to surprises", chat.LastUser);
+            Assert.Contains("shape HOW you advise", chat.LastUser);
+            Assert.Contains("navigate the conversation", chat.LastSystem);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task NoNamedPersonPresent_UsesBasePrompt()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            store.Write("Gavin", "# Gavin\nSomething.\n");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store);
+
+            // Context has only the "Others" channel, no named person, so no profile applies.
+            await advisor.ConsiderAsync(Context(), Context()[^1], [], CancellationToken.None);
+
+            Assert.DoesNotContain("## Gavin", chat.LastUser);
+            Assert.DoesNotContain("navigate the conversation", chat.LastSystem);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task SelfName_IsNotInjected()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            store.Write("Dan", "# Dan\nShould never be injected.\n");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store, selfSpeakerName: "Dan");
+
+            var ctx = new[] { new CaptionEvent(T0, LiveCaptionEngine.MeLabel, "Let me explain.", "Dan") };
+            await advisor.ConsiderAsync(ctx, ctx[^1], [], CancellationToken.None);
+
+            Assert.DoesNotContain("## Dan", chat.LastUser);
+            Assert.DoesNotContain("navigate the conversation", chat.LastSystem);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Profile_IsReadFromDiskOncePerMeeting()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            store.Write("Gavin", "# Gavin\nReacts badly to surprises.\n");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store);
+
+            await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+            Assert.Contains("Reacts badly to surprises", chat.LastUser);
+
+            // Delete the file; the cached profile must still be injected on the next consider.
+            File.Delete(store.PathFor("Gavin"));
+            await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+            Assert.Contains("Reacts badly to surprises", chat.LastUser);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task LongProfile_IsTruncated()
+    {
+        var (store, dir) = NewStore();
+        try
+        {
+            var body = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"- note line {i}"));
+            store.Write("Gavin", "# Gavin\n" + body + "\nUNIQUE_TAIL_MARKER\n");
+            var chat = new CannedChat("""{"advise": false, "kind": "tip", "advice": ""}""");
+            var advisor = new LlmAdvisor(chat, "qwen3:4b", profiles: store);
+
+            await advisor.ConsiderAsync(GavinContext(), GavinContext()[^1], [], CancellationToken.None);
+
+            Assert.Contains("…", chat.LastUser);                        // truncation marker
+            Assert.DoesNotContain("UNIQUE_TAIL_MARKER", chat.LastUser);  // tail dropped past the cap
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    private static (CoachingProfileStore Store, string Dir) NewStore()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "callscribe-adv-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return (new CoachingProfileStore(dir), dir);
     }
 }

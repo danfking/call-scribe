@@ -23,6 +23,10 @@ public static class AppPaths
     public static string RecordingsDir => Path.Combine(OutputRoot, "recordings");
     public static string TranscriptsDir => Path.Combine(OutputRoot, "transcripts");
 
+    // Per-person coaching profiles. Under the same non-synced root as recordings: they hold private
+    // notes about colleagues, so they must not land in a synced folder by default.
+    public static string CoachingDir => Path.Combine(OutputRoot, "coaching");
+
     public static string PidFile => Path.Combine(StateDir, "recording.pid");
     public static string StemFile => Path.Combine(StateDir, "recording.stem");
     public static string StopFlag => Path.Combine(StateDir, "stop.flag");
