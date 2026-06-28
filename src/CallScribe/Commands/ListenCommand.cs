@@ -230,26 +230,6 @@ public static class ListenCommand
                 }
                 catch { /* consolidation is best-effort; never block the transcript */ }
             }
-            if (coachMemory != null && wantCoachPanel && config.CoachingProfilesEnabled && config.SpeakerIdEnabled)
-            {
-                // Refine each named person's coaching profile from this meeting. Gated on speaker-id:
-                // without it the far side is never named, so there is nobody to profile and no reason
-                // to round-trip the DB. Runs after the live relabel above so it sees the consolidated
-                // live names, and on a fresh token like the consolidation: a stop must not abort the write.
-                try
-                {
-                    var updater = CoachFactory.TryCreateProfileUpdater(config, coachMemory);
-                    if (updater != null)
-                    {
-                        var updatedProfiles = await updater.UpdateAsync(stem, CancellationToken.None).ConfigureAwait(false);
-                        if (updatedProfiles > 0)
-                        {
-                            AnsiConsole.MarkupLine($"[grey]Updated {updatedProfiles} coaching profile(s).[/]");
-                        }
-                    }
-                }
-                catch { /* best-effort; never block the transcript */ }
-            }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
 
             // Live-only: skip the slow batch transcription and save the live transcript (already
@@ -281,7 +261,25 @@ public static class ListenCommand
             // than the live guesser and enrolls newly-named speakers for next time.
             if (config.SpeakerIdEnabled && config.DiarizeAfterMeeting)
             {
-                await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct).ConfigureAwait(false);
+                var attributed = await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct)
+                    .ConfigureAwait(false);
+
+                // Refine coaching profiles from the just-named transcript. This runs after the
+                // interactive naming, so a person met for the first time (named here, not live) still
+                // gets a profile. Best-effort: a model hiccup never fails the run.
+                if (attributed != null)
+                {
+                    try
+                    {
+                        var updater = CoachFactory.TryCreateProfileUpdater(config);
+                        if (updater != null)
+                        {
+                            var n = await updater.UpdateAsync(attributed, ct).ConfigureAwait(false);
+                            if (n > 0) AnsiConsole.MarkupLine($"[grey]Updated {n} coaching profile(s).[/]");
+                        }
+                    }
+                    catch { /* best-effort; never fail the run over a coaching profile */ }
+                }
             }
             return 0;
         }

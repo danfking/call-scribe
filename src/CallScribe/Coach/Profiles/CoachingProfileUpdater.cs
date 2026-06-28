@@ -1,13 +1,12 @@
-using System.Text;
 using CallScribe.Coach.Llm;
-using CallScribe.Coach.Memory;
 
 namespace CallScribe.Coach.Profiles;
 
-/// <summary>Runs once a meeting ends (after the speaker labels are finalised): for each named far-side
-/// person who spoke, it refines their markdown coaching profile from the transcript. This is what makes
-/// the profiles evolve over time. It mirrors MeetingConsolidator, but writes per-person markdown rather
-/// than embedded memories, and is best-effort per person so one bad reply never loses the rest.</summary>
+/// <summary>Given a finished meeting's transcript, refines each named far-side person's markdown
+/// coaching profile. This is what makes the profiles evolve over time. It takes the transcript as
+/// lines (the caller supplies them, from the offline-attributed transcript on the live path or from
+/// the coach DB on the replay path), so it does not depend on any store but the profile files. Best
+/// effort per person: one bad reply never loses the rest.</summary>
 public sealed class CoachingProfileUpdater
 {
     private static readonly string SystemPrompt =
@@ -41,35 +40,26 @@ public sealed class CoachingProfileUpdater
 
     private readonly ICoachChat _chat;
     private readonly string _model;
-    private readonly IMemoryStore _store;
     private readonly CoachingProfileStore _profiles;
     private readonly string? _selfName;
 
-    public CoachingProfileUpdater(
-        ICoachChat chat, string model, IMemoryStore store, CoachingProfileStore profiles, string? selfName)
+    public CoachingProfileUpdater(ICoachChat chat, string model, CoachingProfileStore profiles, string? selfName)
     {
         _chat = chat;
         _model = model;
-        _store = store;
         _profiles = profiles;
         _selfName = selfName;
     }
 
-    /// <summary>Refresh every named far-side person's profile from this meeting; returns how many
-    /// profiles were written.</summary>
-    public async Task<int> UpdateAsync(string meetingId, CancellationToken ct)
+    /// <summary>Refresh every named far-side person's profile from this meeting's transcript lines;
+    /// returns how many profiles were written.</summary>
+    public async Task<int> UpdateAsync(IReadOnlyList<(string Speaker, string Text)> lines, CancellationToken ct)
     {
-        var segments = await _store.GetTranscriptAsync(meetingId, ct).ConfigureAwait(false);
-        if (segments.Count == 0) return 0;
+        if (lines.Count == 0) return 0;
 
-        var transcript = new StringBuilder("Transcript:\n");
-        foreach (var s in segments)
-        {
-            transcript.Append(s.Speaker).Append(": ").AppendLine(s.Text);
-        }
-
-        var targets = segments
-            .Select(s => s.Speaker)
+        var transcript = TranscriptText.ForPrompt(lines);
+        var targets = lines
+            .Select(l => l.Speaker)
             .Where(n => CoachingProfiles.IsNamedPerson(n, _selfName))
             .Distinct(StringComparer.OrdinalIgnoreCase);
 
@@ -79,7 +69,7 @@ public sealed class CoachingProfileUpdater
             try
             {
                 var existing = _profiles.Read(person);
-                var user = BuildUserPrompt(person, _selfName, existing, transcript.ToString());
+                var user = BuildUserPrompt(person, _selfName, existing, transcript);
                 var raw = await _chat.CompleteAsync(_model, SystemPrompt, user, jsonMode: false, maxTokens: 2048, ct)
                     .ConfigureAwait(false);
                 var markdown = CleanMarkdown(raw);
@@ -102,7 +92,7 @@ public sealed class CoachingProfileUpdater
 
     private static string BuildUserPrompt(string person, string? selfName, string? existing, string transcript)
     {
-        var sb = new StringBuilder();
+        var sb = new System.Text.StringBuilder();
         sb.Append("Person to profile: ").AppendLine(person);
         sb.Append("The user I am coaching is labelled: ")
           .AppendLine(string.IsNullOrWhiteSpace(selfName) ? "Me" : selfName);

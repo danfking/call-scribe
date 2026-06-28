@@ -34,14 +34,14 @@ public static class CoachFactory
     }
 
     /// <summary>The end-of-meeting coaching-profile updater, or null when the feature is off. The
-    /// memory store supplies the transcript; Ollama unreachability surfaces as a thrown call the
-    /// best-effort caller already swallows, matching MeetingConsolidator.</summary>
-    public static CoachingProfileUpdater? TryCreateProfileUpdater(AppConfig config, IMemoryStore memory)
+    /// caller supplies the transcript lines (offline-attributed on the live path, the coach DB on
+    /// replay). Ollama unreachability surfaces as a thrown call the best-effort caller swallows.</summary>
+    public static CoachingProfileUpdater? TryCreateProfileUpdater(AppConfig config)
     {
         var store = CreateProfileStore(config);
         if (store == null) return null;
         var chat = new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive);
-        return new CoachingProfileUpdater(chat, config.ReasoningModel, memory, store, config.SelfSpeakerName);
+        return new CoachingProfileUpdater(chat, config.ReasoningModel, store, config.SelfSpeakerName);
     }
 
     /// <summary>Build and initialise the memory store, or null if Postgres/Ollama aren't

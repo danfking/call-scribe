@@ -11,7 +11,11 @@ namespace CallScribe.Commands;
 /// note when the models, recording, or database are missing rather than failing the run.</summary>
 public static class SpeakerAttributionFlow
 {
-    public static async Task RunAsync(string stemPath, AppConfig config, bool interactive, CancellationToken ct)
+    /// <summary>Returns the attributed transcript as (speaker, text) lines with authoritative names,
+    /// time-ordered, for a downstream consumer such as the coaching-profile updater; null when the
+    /// pass is skipped (missing recording/models) or finds no speakers.</summary>
+    public static async Task<IReadOnlyList<(string Speaker, string Text)>?> RunAsync(
+        string stemPath, AppConfig config, bool interactive, CancellationToken ct)
     {
         var othersWav = $"{stemPath}.others.wav";
         var meWav = $"{stemPath}.me.wav";
@@ -21,7 +25,7 @@ public static class SpeakerAttributionFlow
         {
             AnsiConsole.MarkupLine(
                 "[grey]Speaker attribution skipped: recording or transcript missing (needs keepAudio).[/]");
-            return;
+            return null;
         }
 
         var embedder = SpeakerIdentity.TryCreateEmbedder(config);
@@ -32,7 +36,7 @@ public static class SpeakerAttributionFlow
             AnsiConsole.MarkupLine(
                 "[grey]Speaker attribution skipped: speaker models not installed "
                 + "(run scripts/coach-pull-speaker-models.ps1).[/]");
-            return;
+            return null;
         }
 
         var voiceprints = await SpeakerIdentity
@@ -49,7 +53,7 @@ public static class SpeakerAttributionFlow
             if (result == null)
             {
                 AnsiConsole.MarkupLine("[grey]No distinct speakers identified.[/]");
-                return;
+                return null;
             }
 
             // Pre-fill the prompts from how speakers introduced themselves ("I'm Sammy").
@@ -108,6 +112,20 @@ public static class SpeakerAttributionFlow
             var names = string.Join(", ", result.Clusters.Select(c => c.Name));
             AnsiConsole.MarkupLine($"[green]Speaker-attributed transcript[/] -> {path.EscapeMarkup()}");
             AnsiConsole.MarkupLine($"[grey]Far-side speakers: {names.EscapeMarkup()}[/]");
+
+            // The attributed transcript (authoritative names), time-ordered, for any downstream
+            // consumer such as the coaching-profile updater.
+            var attributed = new List<(double Start, string Speaker, string Text)>();
+            foreach (var s in others.Segments)
+            {
+                if (!string.IsNullOrWhiteSpace(s.Text)) attributed.Add((s.Start, result.SpeakerFor(s), s.Text));
+            }
+            foreach (var s in meFiltered.Segments)
+            {
+                if (!string.IsNullOrWhiteSpace(s.Text)) attributed.Add((s.Start, meLabel, s.Text));
+            }
+            attributed.Sort((a, b) => a.Start.CompareTo(b.Start));
+            return attributed.Select(a => (Speaker: a.Speaker, Text: a.Text)).ToList();
         }
         finally
         {

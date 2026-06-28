@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CallScribe.Coach.Llm;
@@ -46,15 +45,11 @@ public sealed class MeetingConsolidator
         var segments = await _store.GetTranscriptAsync(meetingId, ct).ConfigureAwait(false);
         if (segments.Count == 0) return 0;
 
-        var transcript = new StringBuilder("Transcript:\n");
-        foreach (var s in segments)
-        {
-            transcript.Append(s.Speaker).Append(": ").AppendLine(s.Text);
-        }
+        var transcript = TranscriptText.ForPrompt(segments.Select(s => (s.Speaker, s.Text)));
 
         // A whole meeting can extract many durable items; give the JSON array room so it is
         // not truncated mid-object (which would fail to parse and silently drop everything).
-        var raw = await _chat.CompleteAsync(_model, SystemPrompt, transcript.ToString(), jsonMode: true, maxTokens: 2048, ct)
+        var raw = await _chat.CompleteAsync(_model, SystemPrompt, transcript, jsonMode: true, maxTokens: 2048, ct)
             .ConfigureAwait(false);
 
         Extraction? extraction;

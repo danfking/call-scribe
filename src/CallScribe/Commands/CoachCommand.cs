@@ -319,19 +319,28 @@ public static class CoachCommand
 
         if (memory != null)
         {
-            var consolidator = new MeetingConsolidator(
-                new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, memory);
-            var stored = await consolidator.ConsolidateAsync(meetingId, ct).ConfigureAwait(false);
-            AnsiConsole.MarkupLine($"[green]Consolidated[/] {stored} memories from this meeting.");
-
-            var updater = CoachFactory.TryCreateProfileUpdater(config, memory);
-            if (updater != null)
+            // Best-effort end-of-meeting work; the finally guarantees the DB connection is released
+            // even if consolidation or the profile update throws.
+            try
             {
-                var updatedProfiles = await updater.UpdateAsync(meetingId, ct).ConfigureAwait(false);
-                AnsiConsole.MarkupLine($"[green]Updated[/] {updatedProfiles} coaching profile(s).");
-            }
+                var consolidator = new MeetingConsolidator(
+                    new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, memory);
+                var stored = await consolidator.ConsolidateAsync(meetingId, ct).ConfigureAwait(false);
+                AnsiConsole.MarkupLine($"[green]Consolidated[/] {stored} memories from this meeting.");
 
-            await memory.DisposeAsync().ConfigureAwait(false);
+                var updater = CoachFactory.TryCreateProfileUpdater(config);
+                if (updater != null)
+                {
+                    var transcript = await memory.GetTranscriptAsync(meetingId, ct).ConfigureAwait(false);
+                    var lines = transcript.Select(l => (l.Speaker, l.Text)).ToList();
+                    var n = await updater.UpdateAsync(lines, ct).ConfigureAwait(false);
+                    AnsiConsole.MarkupLine($"[green]Updated[/] {n} coaching profile(s).");
+                }
+            }
+            finally
+            {
+                await memory.DisposeAsync().ConfigureAwait(false);
+            }
         }
         return 0;
     }

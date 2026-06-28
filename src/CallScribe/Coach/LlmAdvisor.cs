@@ -161,10 +161,18 @@ public sealed class LlmAdvisor : IAdvisor
 
             if (!_profileCache.TryGetValue(name, out var text))
             {
-                try { text = _profiles.Read(name); }
-                catch { text = null; } // best-effort, like RecallAsync; never block advice on a read error
-                text = string.IsNullOrWhiteSpace(text) ? null : Truncate(text!.Trim(), MaxProfileChars);
-                _profileCache[name] = text;
+                try
+                {
+                    var raw = _profiles.Read(name);
+                    text = string.IsNullOrWhiteSpace(raw) ? null : Truncate(raw.Trim(), MaxProfileChars);
+                    _profileCache[name] = text; // cache the result (a hit or a confirmed miss)
+                }
+                catch
+                {
+                    // Transient read error (e.g. the file briefly locked): use nothing this time but do
+                    // NOT cache it, so a later caption retries rather than suppressing it all meeting.
+                    text = null;
+                }
             }
             if (text != null) result.Add((name, text));
         }
