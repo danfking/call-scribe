@@ -14,12 +14,14 @@ dotnet test tests/CallScribe.Tests --filter "FullyQualifiedName~SpeakerResolverT
 
 - `Directory.Build.props` sets `TreatWarningsAsErrors=true` for every project, so any warning
   (including the platform-compatibility analyzer over the WASAPI/COM audio code) fails the build.
-- `src/CallScribe` multi-targets `net10.0;net10.0-windows`. `net10.0-windows` is the headline build
-  (live capture). `net10.0` is the portable build for the Docker image: it does everything downstream
-  of a WAV (transcribe, diarize, coach) and stubs out live capture. Because of the CA1416 analyzer
-  under `TreatWarningsAsErrors`, the Windows-only audio files (`WindowsCaptureBackend`,
-  `VoiceCaptureAec*`) are `Compile Remove`d from the `net10.0` compile, not merely runtime-guarded.
-  Build the portable target with `dotnet build src/CallScribe -f net10.0` to catch platform leaks.
+- `src/CallScribe` targets `net10.0-windows` by default (the headline build, live capture), so the
+  local inner loop is unambiguous (no `dotnet run` framework prompt). The portable `net10.0` target
+  (everything downstream of a WAV, live capture stubbed out) is opted into with
+  `-p:TargetFrameworks=net10.0`: the Docker image builds it that way, and CI has a step that does the
+  same to catch platform leaks. Because of the CA1416 analyzer under `TreatWarningsAsErrors`, the
+  Windows-only audio files (`WindowsCaptureBackend`, `VoiceCaptureAec*`) are `Compile Remove`d from the
+  `net10.0` compile, not merely runtime-guarded. Build the portable target locally with
+  `dotnet build src/CallScribe/CallScribe.csproj -p:TargetFrameworks=net10.0`.
   CUDA is opt-in only via the `CallScribeCuda=true` publish property (it balloons the artifact).
   The tools and tests are `net10.0-windows` and resolve that TFM of the dependency automatically.
 
