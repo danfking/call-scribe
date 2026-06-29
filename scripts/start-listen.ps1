@@ -1,6 +1,6 @@
-# Launcher for the desktop shortcut: starts call-scribe live captions with
-# acoustic echo cancellation on (for speaker use). Press Enter in the window to
-# stop; the full-quality transcript is then written and the location is shown.
+# Launcher for the desktop shortcut: starts call-scribe live captions. Press Enter
+# in the window to stop; the full-quality transcript is then written and the
+# location is shown.
 
 $ErrorActionPreference = "Stop"
 
@@ -11,10 +11,8 @@ if (-not (Test-Path $exe)) {
     exit 1
 }
 
-# Plain listen captures your mic over WASAPI (the Elgato) and the system audio,
-# and suppresses far-side bleed in the text layer. The --aec acoustic canceller
-# is available but does not reliably produce mic output inside listen yet (it
-# clashes with the loopback capture), so the shortcut uses plain listen for now.
+# listen captures the mic over WASAPI and the system audio, and suppresses far-side
+# bleed in the text layer. For the cleanest track separation, use headphones.
 & $exe listen
 
 $transcripts = Join-Path $env:USERPROFILE "call-scribe\transcripts"
