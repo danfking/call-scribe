@@ -300,7 +300,8 @@ public static class CoachCommand
 
         var config = AppConfig.Load();
         var memory = stub ? null : await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-        var (advisor, usingModel) = CoachFactory.CreateAdvisor(config, forceStub: stub, memory);
+        var profileStore = CoachFactory.CreateProfileStore(config);
+        var (advisor, usingModel) = CoachFactory.CreateAdvisor(config, forceStub: stub, memory, profileStore);
         var meetingId = $"{Path.GetFileNameWithoutExtension(script)}-replay";
 
         using var display = new LiveStatusDisplay();
@@ -318,11 +319,28 @@ public static class CoachCommand
 
         if (memory != null)
         {
-            var consolidator = new MeetingConsolidator(
-                new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, memory);
-            var stored = await consolidator.ConsolidateAsync(meetingId, ct).ConfigureAwait(false);
-            AnsiConsole.MarkupLine($"[green]Consolidated[/] {stored} memories from this meeting.");
-            await memory.DisposeAsync().ConfigureAwait(false);
+            // Best-effort end-of-meeting work; the finally guarantees the DB connection is released
+            // even if consolidation or the profile update throws.
+            try
+            {
+                var consolidator = new MeetingConsolidator(
+                    new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive), config.ReasoningModel, memory);
+                var stored = await consolidator.ConsolidateAsync(meetingId, ct).ConfigureAwait(false);
+                AnsiConsole.MarkupLine($"[green]Consolidated[/] {stored} memories from this meeting.");
+
+                var updater = CoachFactory.TryCreateProfileUpdater(config);
+                if (updater != null)
+                {
+                    var transcript = await memory.GetTranscriptAsync(meetingId, ct).ConfigureAwait(false);
+                    var lines = transcript.Select(l => (l.Speaker, l.Text)).ToList();
+                    var n = await updater.UpdateAsync(lines, ct).ConfigureAwait(false);
+                    AnsiConsole.MarkupLine($"[green]Updated[/] {n} coaching profile(s).");
+                }
+            }
+            finally
+            {
+                await memory.DisposeAsync().ConfigureAwait(false);
+            }
         }
         return 0;
     }

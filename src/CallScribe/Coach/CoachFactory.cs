@@ -1,5 +1,6 @@
 using CallScribe.Coach.Llm;
 using CallScribe.Coach.Memory;
+using CallScribe.Coach.Profiles;
 
 namespace CallScribe.Coach;
 
@@ -11,14 +12,36 @@ public static class CoachFactory
     /// <summary>Returns (advisor, usingModel). usingModel is false when the stub was chosen,
     /// so callers can tell the user why advice looks canned.</summary>
     public static (IAdvisor Advisor, bool UsingModel) CreateAdvisor(
-        AppConfig config, bool forceStub, IMemoryStore? memory = null)
+        AppConfig config, bool forceStub, IMemoryStore? memory = null, CoachingProfileStore? profiles = null)
     {
         if (forceStub) return (new StubAdvisor(), false);
 
         var chat = new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive);
         return chat.IsReachable()
-            ? (new LlmAdvisor(chat, config.FastModel, memory, config.CoachRecallMaxDistance), true)
+            ? (new LlmAdvisor(chat, config.FastModel, memory, config.CoachRecallMaxDistance,
+                   profiles, config.SelfSpeakerName), true)
             : (new StubAdvisor(), false);
+    }
+
+    /// <summary>The per-person coaching-profile store, or null when the feature is off. Construction is
+    /// cheap (markdown files, no Ollama/Postgres dependency), so callers can build it unconditionally.</summary>
+    public static CoachingProfileStore? CreateProfileStore(AppConfig config)
+    {
+        if (!config.CoachingProfilesEnabled) return null;
+        var dir = string.IsNullOrWhiteSpace(config.CoachingProfilesDir)
+            ? AppPaths.CoachingDir : config.CoachingProfilesDir;
+        return new CoachingProfileStore(dir);
+    }
+
+    /// <summary>The end-of-meeting coaching-profile updater, or null when the feature is off. The
+    /// caller supplies the transcript lines (offline-attributed on the live path, the coach DB on
+    /// replay). Ollama unreachability surfaces as a thrown call the best-effort caller swallows.</summary>
+    public static CoachingProfileUpdater? TryCreateProfileUpdater(AppConfig config)
+    {
+        var store = CreateProfileStore(config);
+        if (store == null) return null;
+        var chat = new OllamaChat(config.OllamaUrl, config.OllamaKeepAlive);
+        return new CoachingProfileUpdater(chat, config.ReasoningModel, store, config.SelfSpeakerName);
     }
 
     /// <summary>Build and initialise the memory store, or null if Postgres/Ollama aren't

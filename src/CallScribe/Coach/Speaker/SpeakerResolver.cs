@@ -182,9 +182,10 @@ public sealed class SpeakerResolver
     }
 
     /// <summary>A generic, unnamed session label ("Speaker 1", "Speaker 2", …) as minted by
-    /// <see cref="AssignSession"/>, versus an enrolled person's real name.</summary>
-    private static bool IsAnonymous(string label) =>
-        System.Text.RegularExpressions.Regex.IsMatch(label, @"^Speaker \d+$");
+    /// <see cref="AssignSession"/>, versus an enrolled person's real name. The single source of truth
+    /// for this test (the coaching-profile code reuses it).</summary>
+    internal static bool IsAnonymous(string label) =>
+        System.Text.RegularExpressions.Regex.IsMatch(label, @"^Speaker \d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>Rename a session speaker (e.g. from a live /assign-name) so future captions in
     /// that voice use <paramref name="newLabel"/>, and return its averaged voiceprint for

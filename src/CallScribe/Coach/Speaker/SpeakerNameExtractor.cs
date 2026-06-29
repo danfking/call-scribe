@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -65,16 +64,12 @@ public static partial class SpeakerNameExtractor
     {
         if (lines.Count == 0) return new Dictionary<string, string>();
 
-        var transcript = new StringBuilder("Transcript:\n");
-        foreach (var (speaker, text) in lines)
-        {
-            transcript.Append(speaker).Append(": ").AppendLine(text);
-        }
+        var transcript = TranscriptText.ForPrompt(lines);
 
         string raw;
         try
         {
-            raw = await chat.CompleteAsync(model, SystemPrompt, transcript.ToString(), jsonMode: true, maxTokens: 400, ct)
+            raw = await chat.CompleteAsync(model, SystemPrompt, transcript, jsonMode: true, maxTokens: 400, ct)
                 .ConfigureAwait(false);
         }
         catch

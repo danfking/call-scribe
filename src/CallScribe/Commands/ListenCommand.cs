@@ -118,7 +118,8 @@ public static class ListenCommand
             if (wantCoachPanel || liveOnly)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
-                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory);
+                var profileStore = CoachFactory.CreateProfileStore(config);
+                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory, profileStore);
                 coach = new CoachEngine(advisor, coachMemory, stem);
                 if (wantCoachPanel)
                 {
@@ -260,7 +261,25 @@ public static class ListenCommand
             // than the live guesser and enrolls newly-named speakers for next time.
             if (config.SpeakerIdEnabled && config.DiarizeAfterMeeting)
             {
-                await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct).ConfigureAwait(false);
+                var attributed = await SpeakerAttributionFlow.RunAsync(stemPath, config, interactive: true, ct)
+                    .ConfigureAwait(false);
+
+                // Refine coaching profiles from the just-named transcript. This runs after the
+                // interactive naming, so a person met for the first time (named here, not live) still
+                // gets a profile. Best-effort: a model hiccup never fails the run.
+                if (attributed != null)
+                {
+                    try
+                    {
+                        var updater = CoachFactory.TryCreateProfileUpdater(config);
+                        if (updater != null)
+                        {
+                            var n = await updater.UpdateAsync(attributed, ct).ConfigureAwait(false);
+                            if (n > 0) AnsiConsole.MarkupLine($"[grey]Updated {n} coaching profile(s).[/]");
+                        }
+                    }
+                    catch { /* best-effort; never fail the run over a coaching profile */ }
+                }
             }
             return 0;
         }
