@@ -37,18 +37,6 @@ public static class ListenCommand
                           + "(faster; slightly lower accuracy). Best with --speakers so the live "
                           + "speaker labels are consolidated first. Needs the coach memory DB.",
         };
-        var aecOption = new Option<bool>("--aec")
-        {
-            Description = "Cancel far-side speaker bleed from the mic with the Windows Voice Capture DSP "
-                          + "(for speaker use; unnecessary on headphones). The Me track becomes 16 kHz mono.",
-        };
-        var aesOption = new Option<int>("--aes")
-        {
-            Description = "AEC residual suppressor level 0-2 (default 0 = plain AEC, never clips your voice). "
-                          + "Higher cancels more far-side bleed but can clip your own voice during double-talk. "
-                          + "Only used with --aec.",
-            DefaultValueFactory = _ => 0,
-        };
         var coachOption = new Option<bool>("--coach")
         {
             Description = "Show the realtime meeting coach panel beside the transcript (experimental).",
@@ -66,8 +54,6 @@ public static class ListenCommand
         command.Options.Add(secondsOption);
         command.Options.Add(noTranscribeOption);
         command.Options.Add(liveOnlyOption);
-        command.Options.Add(aecOption);
-        command.Options.Add(aesOption);
         command.Options.Add(coachOption);
         command.Options.Add(speakersOption);
         command.SetAction((parseResult, ct) => RunAsync(
@@ -76,15 +62,13 @@ public static class ListenCommand
             parseResult.GetValue(secondsOption),
             parseResult.GetValue(noTranscribeOption),
             parseResult.GetValue(liveOnlyOption),
-            parseResult.GetValue(aecOption),
-            parseResult.GetValue(aesOption),
             parseResult.GetValue(coachOption),
             parseResult.GetValue(speakersOption),
             ct));
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool liveOnly, bool aec, int aes, bool coachFlag, bool speakersFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool liveOnly, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
 
@@ -99,7 +83,7 @@ public static class ListenCommand
             ModelManager.ParseModel(liveModel), QuantizationType.NoQuantization, ct).ConfigureAwait(false);
 
         var stem = RecordCommand.MakeStem(label);
-        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config, aecMic: aec, aecSuppressionLevel: aes);
+        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
         using var captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
 
         // Created inside the try so a cancellation (Ctrl-C) during capture still disposes
