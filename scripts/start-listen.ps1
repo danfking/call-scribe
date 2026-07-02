@@ -1,6 +1,7 @@
 # Launcher for the desktop shortcut: starts call-scribe live captions. Press Enter
-# in the window to stop; the full-quality transcript is then written and the
-# location is shown.
+# in the window to stop; the live transcript is then saved and the location is shown.
+# For the slow, high-accuracy batch pass (large model + offline diarization) instead,
+# run "call-scribe listen --full".
 
 $ErrorActionPreference = "Stop"
 

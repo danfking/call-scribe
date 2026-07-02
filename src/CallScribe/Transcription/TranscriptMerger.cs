@@ -29,7 +29,7 @@ public static class TranscriptMerger
 
     /// <summary>Write the live transcript (the per-chunk captions persisted to the coach DB during
     /// the meeting, already carrying resolved/consolidated speaker names) as a .md in the SAME format
-    /// as <see cref="Merge"/>, so the live-only path produces the same artifact the batch pass would.
+    /// as <see cref="Merge"/>, so the default path (no --full) produces the same artifact the batch pass would.
     /// A <c>source: live</c> frontmatter line marks it as the lower-latency, slightly-lower-accuracy
     /// transcript rather than the full-quality final one. Each line already knows its wall-clock time
     /// and speaker, so this just groups consecutive same-speaker lines under a stamped header.</summary>

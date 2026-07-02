@@ -18,7 +18,8 @@ Right, so it has to actually listen to the output device.
 
 ```
 call-scribe record --label standup     # record until Enter, then auto-transcribe
-call-scribe listen --label standup     # same, plus live captions on screen as the call happens
+call-scribe listen --label standup     # live captions on screen; Enter saves the live transcript
+call-scribe listen --full              # same, but run the slow high-accuracy batch pass at the end
 call-scribe record start --label sync  # detached recording
 call-scribe record stop                # stop and finalise
 call-scribe record status              # is a recording running?
@@ -27,7 +28,7 @@ call-scribe devices                    # list audio devices
 call-scribe config                     # show settings
 ```
 
-`listen` shows fast-preview captions from a small model (small.en by default) while recording; the accurate transcript is still produced by the full model when you stop.
+`listen` shows live captions from a small model (small.en by default) while recording. When you stop, it saves that live transcript by default (fast, no extra wait). Add `--full` to run the slow, high-accuracy batch pass with the large model instead, which also does offline speaker diarization and interactive naming. The live transcript is held in the coach memory DB, so the default path needs that DB running (it falls back to the batch pass with a note if it is not).
 
 Transcripts land in `%USERPROFILE%\call-scribe\transcripts\` as markdown with wall-clock timestamps and YAML frontmatter.
 

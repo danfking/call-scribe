@@ -29,13 +29,13 @@ public static class ListenCommand
         };
         var noTranscribeOption = new Option<bool>("--no-transcribe")
         {
-            Description = "Skip the full-quality transcription after stopping",
+            Description = "Record only: write no transcript at all (skip both the live save and the batch pass)",
         };
-        var liveOnlyOption = new Option<bool>("--live-only")
+        var fullOption = new Option<bool>("--full")
         {
-            Description = "Skip the slow batch transcription and save the live transcript instead "
-                          + "(faster; slightly lower accuracy). Best with --speakers so the live "
-                          + "speaker labels are consolidated first. Needs the coach memory DB.",
+            Description = "Run the slow, high-accuracy batch transcription after stopping (whisper-large + VAD) "
+                          + "plus offline speaker diarization and interactive naming. The default saves the "
+                          + "faster live transcript instead (slightly lower accuracy; needs the coach memory DB).",
         };
         var coachOption = new Option<bool>("--coach")
         {
@@ -48,12 +48,12 @@ public static class ListenCommand
         };
 
         var command = new Command("listen",
-            "Record with live captions on screen; Enter stops, then the full-quality transcription runs");
+            "Record with live captions on screen; Enter stops and saves the live transcript (use --full for the slow high-accuracy batch pass)");
         command.Options.Add(labelOption);
         command.Options.Add(liveModelOption);
         command.Options.Add(secondsOption);
         command.Options.Add(noTranscribeOption);
-        command.Options.Add(liveOnlyOption);
+        command.Options.Add(fullOption);
         command.Options.Add(coachOption);
         command.Options.Add(speakersOption);
         command.SetAction((parseResult, ct) => RunAsync(
@@ -61,14 +61,14 @@ public static class ListenCommand
             parseResult.GetValue(liveModelOption)!,
             parseResult.GetValue(secondsOption),
             parseResult.GetValue(noTranscribeOption),
-            parseResult.GetValue(liveOnlyOption),
+            parseResult.GetValue(fullOption),
             parseResult.GetValue(coachOption),
             parseResult.GetValue(speakersOption),
             ct));
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool liveOnly, bool coachFlag, bool speakersFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool full, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
 
@@ -94,12 +94,15 @@ public static class ListenCommand
         try
         {
             // The coach watches the same caption stream the dashboard renders. Opt-in via --coach
-            // or config; the stub advisor needs no models, so this works offline. --live-only also
-            // needs the coach's transcript store (that is where the live transcript is persisted for
-            // the stop-time export), but not the advice panel, so it runs the coach with a stub
-            // advisor (no Ollama, no panel) purely to persist segments.
+            // or config; the stub advisor needs no models, so this works offline. The default
+            // (live-transcript) path also needs the coach's transcript store (that is where the live
+            // transcript is persisted for the stop-time export), but not the advice panel, so it runs
+            // the coach with a stub advisor (no Ollama, no panel) purely to persist segments.
             var wantCoachPanel = coachFlag || config.CoachEnabled;
-            if (wantCoachPanel || liveOnly)
+            // The live transcript is the default artifact; only --full (batch pass) or --no-transcribe
+            // (record only) opt out of saving it, and only then do we not need the transcript store.
+            var wantLiveTranscript = !full && !noTranscribe;
+            if (wantCoachPanel || wantLiveTranscript)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
                 var profileStore = CoachFactory.CreateProfileStore(config);
@@ -203,8 +206,8 @@ public static class ListenCommand
             {
                 // Consolidate the meeting into durable memories for future recall. Run it on a
                 // fresh token, not the session ct: a stop (Enter/Ctrl-C) cancels ct, and the
-                // end-of-meeting write is exactly the work that should survive the stop. Skipped on a
-                // bare --live-only run, which wants speed and no Ollama dependency.
+                // end-of-meeting write is exactly the work that should survive the stop. Skipped when
+                // the coach panel is off (a plain listen wants speed and no Ollama dependency).
                 try
                 {
                     var consolidator = new MeetingConsolidator(
@@ -216,10 +219,16 @@ public static class ListenCommand
             }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
 
-            // Live-only: skip the slow batch transcription and save the live transcript (already
-            // consolidated above) as the .md artifact instead. Falls back to the batch pass if the
-            // coach DB that holds the live transcript is unavailable.
-            if (liveOnly)
+            // Record only: no transcript artifact at all.
+            if (noTranscribe) return 0;
+
+            // Default: save the live transcript (already consolidated above) as the .md artifact and
+            // refine coaching profiles from it. This skips the slow whisper-large batch pass, which on
+            // a long call is minutes of waiting; the benchmark (tools/TranscriptReconcile) showed the
+            // live transcript stands in for it once the live model is large enough and speaker labels
+            // are consolidated (use --speakers). Falls back to the batch pass if the coach DB that
+            // holds the live transcript is unavailable.
+            if (!full)
             {
                 if (coachMemory != null)
                 {
@@ -227,16 +236,20 @@ public static class ListenCommand
                     var path = TranscriptMerger.MergeLive(
                         stem, [.. live.Select(l => (l.At, l.Speaker, l.Text))], AppPaths.TranscriptsDir, duration);
                     AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path}");
+
+                    // Keep coaching profiles evolving on the fast path. The --full path refines them
+                    // from the offline-attributed transcript, but that pass does not run here, so use
+                    // the consolidated live transcript instead. Best-effort, on CancellationToken.None
+                    // like the other end-of-meeting work.
+                    await UpdateCoachingProfilesAsync(
+                        config, [.. live.Select(l => (l.Speaker, l.Text))], CancellationToken.None).ConfigureAwait(false);
                     return 0;
                 }
-                // Coach DB unavailable: we cannot save the live transcript. Fall through to the normal
-                // flow below, which runs the batch pass (or honours --no-transcribe) so the message
-                // never promises an artifact that the following lines would skip.
+                // Coach DB unavailable: we cannot save the live transcript. Fall through to the batch
+                // pass so the run still produces an artifact rather than promising one it cannot write.
                 AnsiConsole.MarkupLine(
-                    "[yellow]--live-only needs the coach memory DB, which is unavailable; cannot save the live transcript.[/]");
+                    "[yellow]The live transcript needs the coach memory DB, which is unavailable; running the batch transcription instead.[/]");
             }
-
-            if (noTranscribe) return 0;
 
             var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
             await TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
@@ -250,19 +263,10 @@ public static class ListenCommand
 
                 // Refine coaching profiles from the just-named transcript. This runs after the
                 // interactive naming, so a person met for the first time (named here, not live) still
-                // gets a profile. Best-effort: a model hiccup never fails the run.
+                // gets a profile.
                 if (attributed != null)
                 {
-                    try
-                    {
-                        var updater = CoachFactory.TryCreateProfileUpdater(config);
-                        if (updater != null)
-                        {
-                            var n = await updater.UpdateAsync(attributed, ct).ConfigureAwait(false);
-                            if (n > 0) AnsiConsole.MarkupLine($"[grey]Updated {n} coaching profile(s).[/]");
-                        }
-                    }
-                    catch { /* best-effort; never fail the run over a coaching profile */ }
+                    await UpdateCoachingProfilesAsync(config, attributed, ct).ConfigureAwait(false);
                 }
             }
             return 0;
@@ -273,5 +277,24 @@ public static class ListenCommand
             if (coachMemory != null) await coachMemory.DisposeAsync().ConfigureAwait(false);
             if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Refine the per-person coaching profiles from a transcript. Shared by the default
+    /// live path (consolidated live transcript) and the --full path (offline-attributed transcript).
+    /// Best-effort: no-op when profiles are disabled or Ollama is unavailable, and a model hiccup
+    /// never fails the run.</summary>
+    private static async Task UpdateCoachingProfilesAsync(
+        AppConfig config, IReadOnlyList<(string Speaker, string Text)> lines, CancellationToken ct)
+    {
+        try
+        {
+            var updater = CoachFactory.TryCreateProfileUpdater(config);
+            if (updater != null)
+            {
+                var n = await updater.UpdateAsync(lines, ct).ConfigureAwait(false);
+                if (n > 0) AnsiConsole.MarkupLine($"[grey]Updated {n} coaching profile(s).[/]");
+            }
+        }
+        catch { /* best-effort; never fail the run over a coaching profile */ }
     }
 }
