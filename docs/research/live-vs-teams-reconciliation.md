@@ -31,6 +31,13 @@ model and live speaker consolidation.** Everything else is polish or measurement
 > (a fast `--live-only` path that exports the live transcript), not removed, so users who want the
 > extra ~3-5 WER points and authoritative diarization can still opt in.
 
+> **Update (2026-07-02, default flipped, #61).** The optional path shipped first as `--live-only`,
+> then became the default: plain `listen` now saves the consolidated live transcript, and the slow
+> batch pass (plus offline diarization/naming/enrollment) is opt-in via `--full`. The predicted
+> lost-side-effect is real, so coaching profiles are now refined from the live transcript on the
+> default path and from the offline-attributed transcript under `--full`. The batch pass is not
+> removed; the DB dependency stands, with a documented fallback to `--full` when the DB is down.
+
 Live trails final by only ~5 WER points (24.1% vs 19.5%) with near-equal recall (92.0% vs 93.6%),
 and live's word-attribution (97%) is actually *higher* than final's (91%). Live timing is already
 good. So the live transcript's *content* is close to final quality. The live *speaker layer* is not:
