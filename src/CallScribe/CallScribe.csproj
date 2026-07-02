@@ -2,10 +2,11 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- net10.0-windows is the headline build (live capture). net10.0 is the portable build for the
-         Docker image: it does everything downstream of a WAV (transcribe, diarize, coach) and stubs
-         out live capture, so it must compile without the Windows-only WASAPI/COM audio code. -->
-    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
+    <!-- net10.0-windows is the headline build (live capture) and the only target by default, so the
+         local inner loop (dotnet run/build) is unambiguous. The portable net10.0 target (everything
+         downstream of a WAV, no Windows-only audio) is opted into with -p:TargetFrameworks=net10.0:
+         the Docker image builds it, and CI verifies it to catch platform leaks. -->
+    <TargetFrameworks>net10.0-windows</TargetFrameworks>
     <RootNamespace>CallScribe</RootNamespace>
     <AssemblyName>call-scribe</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
