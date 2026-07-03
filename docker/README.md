@@ -11,7 +11,7 @@ A cross-platform (linux/amd64 + linux/arm64) image for the **offline** half of c
 - `config` to inspect or change settings.
 
 **Cannot** (these report "live audio capture is only available on Windows" and exit):
-- `record`, `listen` (WASAPI loopback and microphone capture have no portable API).
+- `record`, `start` (WASAPI loopback and microphone capture have no portable API).
 - `devices` (MMDevice enumeration is Windows-only).
 - `coach enroll-me` (records from the live mic; enroll from an existing WAV instead).
 

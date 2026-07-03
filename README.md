@@ -17,18 +17,17 @@ Right, so it has to actually listen to the output device.
 ## Usage
 
 ```
-call-scribe record --label standup     # record until Enter, then auto-transcribe
-call-scribe listen --label standup     # live captions on screen; Enter saves the live transcript
-call-scribe listen --full              # same, but run the slow high-accuracy batch pass at the end
-call-scribe record start --label sync  # detached recording
-call-scribe record stop                # stop and finalise
+call-scribe start --label standup      # record with live captions; Enter saves the transcript
+call-scribe start --full               # same, but run the slow high-accuracy batch pass at the end
+call-scribe record start --label sync  # detached background recording
+call-scribe record stop                # stop, finalise, and transcribe
 call-scribe record status              # is a recording running?
 call-scribe transcribe latest          # transcribe the newest recording
 call-scribe devices                    # list audio devices
 call-scribe config                     # show settings
 ```
 
-`listen` shows live captions from a small model (small.en by default) while recording. When you stop, it saves that live transcript by default (fast, no extra wait). Add `--full` to run the slow, high-accuracy batch pass with the large model instead, which also does offline speaker diarization and interactive naming. The live transcript is held in the coach memory DB, so the default path needs that DB running (it falls back to the batch pass with a note if it is not).
+`start` records both tracks, shows live captions from a small model (small.en by default), and on stop saves that live transcript by default (fast, no extra wait). It replaces the old separate `record` and `listen` verbs: there is no record-without-transcribe path any more. Add `--full` to run the slow, high-accuracy batch pass with the large model instead, which also does offline speaker diarization and interactive naming. The live transcript is held in the coach memory DB, so the default path needs that DB running (it falls back to the batch pass with a note if it is not). For background recording without the on-screen dashboard, use `record start` / `record stop`.
 
 Transcripts land in `%USERPROFILE%\call-scribe\transcripts\` as markdown with wall-clock timestamps and YAML frontmatter.
 
@@ -47,7 +46,7 @@ docker compose -f docker/callscribe.compose.yml up -d coach-db ollama
 docker compose -f docker/callscribe.compose.yml run --rm app transcribe
 ```
 
-The container does transcribe / diarize / coach / memory; it cannot do live host capture (`record`, `listen`, `devices`, `coach enroll-me` report that capture is Windows-only). See [docker/README.md](docker/README.md) for the full setup.
+The container does transcribe / diarize / coach / memory; it cannot do live host capture (`start`, `record`, `devices`, `coach enroll-me` report that capture is Windows-only). See [docker/README.md](docker/README.md) for the full setup.
 
 ## The sharp edges
 

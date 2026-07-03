@@ -39,7 +39,7 @@ Audio, Transcription do NOT depend on Coach.
   The two-track split is what gives exact speaker separation, the near side is never diarized. Live
   capture sits behind the `ICaptureBackend` seam (`CaptureBackend.Current`): `WindowsCaptureBackend`
   (WASAPI/AEC, Windows-only file) or `UnsupportedCaptureBackend` (portable build). The live commands
-  (`record`, `listen`, `devices`, `coach enroll-me`) check `CaptureBackend.SupportsLiveCapture` and
+  (`start`, `record`, `devices`, `coach enroll-me`) check `CaptureBackend.SupportsLiveCapture` and
   degrade with a clear message off-Windows.
 - **Transcription**: live captions (`LiveCaptionEngine` + `LiveStatusDisplay` dashboard, small model,
   fixed audio-window chunking) vs the stop-time batch pass (`TranscriptionService`, large model + VAD,

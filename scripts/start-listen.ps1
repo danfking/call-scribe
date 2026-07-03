@@ -1,7 +1,7 @@
 # Launcher for the desktop shortcut: starts call-scribe live captions. Press Enter
 # in the window to stop; the live transcript is then saved and the location is shown.
 # For the slow, high-accuracy batch pass (large model + offline diarization) instead,
-# run "call-scribe listen --full".
+# run "call-scribe start --full".
 
 $ErrorActionPreference = "Stop"
 
@@ -14,7 +14,7 @@ if (-not (Test-Path $exe)) {
 
 # listen captures the mic over WASAPI and the system audio, and suppresses far-side
 # bleed in the text layer. For the cleanest track separation, use headphones.
-& $exe listen
+& $exe start
 
 $transcripts = Join-Path $env:USERPROFILE "call-scribe\transcripts"
 Write-Host ""

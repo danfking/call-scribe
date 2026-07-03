@@ -13,34 +13,19 @@ public static class RecordCommand
         {
             Description = "Label appended to the recording name, e.g. standup",
         };
-        var secondsOption = new Option<int?>("--seconds")
-        {
-            Description = "Stop automatically after N seconds (default: Enter stops)",
-        };
 
-        var noTranscribeOption = new Option<bool>("--no-transcribe")
-        {
-            Description = "Skip the automatic transcription after stopping",
-        };
-
-        var record = new Command("record", "Record the current call in the foreground; Enter stops, then auto-transcribes");
-        record.Options.Add(labelOption);
-        record.Options.Add(secondsOption);
-        record.Options.Add(noTranscribeOption);
-        record.SetAction((parseResult, ct) =>
-            RunForegroundAsync(
-                parseResult.GetValue(labelOption),
-                parseResult.GetValue(secondsOption),
-                parseResult.GetValue(noTranscribeOption),
-                ct));
+        // The foreground record verb is retired: `start` (live captions + transcribe) covers it.
+        // `record` is now a container for detached background recording only.
+        var record = new Command("record",
+            "Background (detached) recording: start it, walk away, then stop it later (it transcribes on stop)");
 
         var start = new Command("start", "Start a detached background recording");
         start.Options.Add(labelOption);
         start.SetAction(parseResult => StartDetached(parseResult.GetValue(labelOption)));
         record.Subcommands.Add(start);
 
-        var stop = new Command("stop", "Stop the detached recording and finalise the files");
-        stop.SetAction(_ => StopDetached());
+        var stop = new Command("stop", "Stop the detached recording, finalise the files, and transcribe");
+        stop.SetAction((_, ct) => StopDetachedAsync(ct));
         record.Subcommands.Add(stop);
 
         var status = new Command("status", "Show whether a recording is in progress");
@@ -63,57 +48,6 @@ public static class RecordCommand
         if (string.IsNullOrWhiteSpace(label)) return stamp;
         var safe = string.Join("-", label.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         return $"{stamp}-{safe}";
-    }
-
-    private static async Task<int> RunForegroundAsync(string? label, int? seconds, bool noTranscribe, CancellationToken ct)
-    {
-        if (LiveCaptureGuard.Unavailable()) return 1;
-        if (IsRecordingInProgress())
-        {
-            AnsiConsole.MarkupLine("[red]A detached recording is already in progress. Stop it first.[/]");
-            return 1;
-        }
-
-        var config = AppConfig.Load();
-        var stem = MakeStem(label);
-        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
-        engine.Start();
-
-        AnsiConsole.MarkupLine($"[green]Recording[/] -> {engine.OthersPath.EscapeMarkup()} (+ .me.wav)");
-        AnsiConsole.MarkupLine($"  Others: {engine.LoopbackDeviceName.EscapeMarkup()} (loopback)");
-        AnsiConsole.MarkupLine($"  Me:     {engine.MicDeviceName.EscapeMarkup()}");
-        AnsiConsole.MarkupLine("[grey]Loopback follows the default output device; don't switch outputs mid-call.[/]");
-
-        if (seconds is int s)
-        {
-            AnsiConsole.MarkupLine($"Stopping automatically in {s}s...");
-            await Task.Delay(TimeSpan.FromSeconds(s), ct).ConfigureAwait(false);
-        }
-        else
-        {
-            AnsiConsole.MarkupLine("Press [bold]Enter[/] to stop.");
-            await WaitForEnterAsync(ct).ConfigureAwait(false);
-        }
-
-        var duration = await engine.StopAsync().ConfigureAwait(false);
-        AnsiConsole.MarkupLine($"[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
-        ReportCaptureErrors(engine);
-
-        if (noTranscribe) return 0;
-
-        var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
-        await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, config, ct).ConfigureAwait(false);
-        return 0;
-    }
-
-    private static void ReportCaptureErrors(CaptureEngine engine)
-    {
-        foreach (var (track, error) in engine.Errors)
-        {
-            AnsiConsole.MarkupLine(
-                $"[yellow]Warning:[/] {track} capture failed mid-recording ({error.Message.EscapeMarkup()}). " +
-                "The track was finalised with what was captured up to that point.");
-        }
     }
 
     private static int StartDetached(string? label)
@@ -174,7 +108,7 @@ public static class RecordCommand
         return 0;
     }
 
-    private static int StopDetached()
+    private static async Task<int> StopDetachedAsync(CancellationToken ct)
     {
         if (!File.Exists(AppPaths.PidFile))
         {
@@ -205,15 +139,20 @@ public static class RecordCommand
 
         var others = Path.Combine(AppPaths.RecordingsDir, $"{stem}.others.wav");
         var me = Path.Combine(AppPaths.RecordingsDir, $"{stem}.me.wav");
-        if (File.Exists(others) && File.Exists(me))
-        {
-            var sizeMb = (new FileInfo(others).Length + new FileInfo(me).Length) / 1024.0 / 1024.0;
-            AnsiConsole.MarkupLine($"[green]Recording stopped[/] -> {others.EscapeMarkup()} (+ .me.wav, {sizeMb:F1} MB total)");
-        }
-        else
+        if (!File.Exists(others) || !File.Exists(me))
         {
             AnsiConsole.MarkupLine($"[yellow]Recording stopped but output not found for stem {stem.EscapeMarkup()}.[/]");
+            return 0;
         }
+
+        var sizeMb = (new FileInfo(others).Length + new FileInfo(me).Length) / 1024.0 / 1024.0;
+        AnsiConsole.MarkupLine($"[green]Recording stopped[/] -> {others.EscapeMarkup()} (+ .me.wav, {sizeMb:F1} MB total)");
+
+        // Every recording path produces a transcript; the detached worker only captured the WAVs, so
+        // run the batch transcription now that the files are finalised.
+        var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
+        await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, AppConfig.Load(), ct)
+            .ConfigureAwait(false);
         return 0;
     }
 
@@ -243,10 +182,5 @@ public static class RecordCommand
         {
             return false;
         }
-    }
-
-    private static async Task WaitForEnterAsync(CancellationToken ct)
-    {
-        await Task.Run(() => Console.ReadLine(), ct).ConfigureAwait(false);
     }
 }

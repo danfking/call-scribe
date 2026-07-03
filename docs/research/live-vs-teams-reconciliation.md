@@ -32,7 +32,8 @@ model and live speaker consolidation.** Everything else is polish or measurement
 > extra ~3-5 WER points and authoritative diarization can still opt in.
 
 > **Update (2026-07-02, default flipped, #61).** The optional path shipped first as `--live-only`,
-> then became the default: plain `listen` now saves the consolidated live transcript, and the slow
+> then became the default: plain `start` (the merged record+captions+transcribe command, formerly
+> `listen`) now saves the consolidated live transcript, and the slow
 > batch pass (plus offline diarization/naming/enrollment) is opt-in via `--full`. The predicted
 > lost-side-effect is real, so coaching profiles are now refined from the live transcript on the
 > default path and from the offline-attributed transcript under `--full`. The batch pass is not
@@ -66,7 +67,7 @@ closes to ~21-22%, final can be retired. The bar is **parity with final, not par
    Largest content lever: expect WER ~21-22%, CER ~14%, and fewer hallucination/repetition loops.
 2. **Live speaker consolidation** (structural, high). **Done (#35).** A deferred `SpeakerResolver.Consolidate`
    pass mirroring offline `MergeSmallClusters` (`OfflineDiarization.cs:122-165`), wired into the
-   `listen` stop flow, which rewrites the persisted live transcript via `IMemoryStore.RelabelAsync`.
+   `start` stop flow, which rewrites the persisted live transcript via `IMemoryStore.RelabelAsync`.
    Measured A/B on `0931` (LiveReplay + reconcile vs Teams): far-side labels **24 → 8** (true ~7) with
    word attribution **flat at 96%** and WER unchanged. Key finding: a blanket agglomerative "merge the
    closest pair" collapses *distinct* speakers (Kiel+Deon sit <0.72 apart on noisy live embeddings, so

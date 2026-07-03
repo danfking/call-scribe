@@ -1,7 +1,7 @@
 # Launcher for the coach desktop shortcut: starts call-scribe live captions with the
 # realtime coach panel on. Brings up the local services the coach needs (Ollama for
 # inference, the Timescale+pgvector container for memory) best-effort first, then runs
-# `listen --coach`. Press Enter in the window to stop; the full-quality transcript is
+# `start --coach`. Press Enter in the window to stop; the full-quality transcript is
 # written and its location shown. The coach degrades gracefully if a service is down
 # (no model -> no advice; no database -> no memory), so a missing service never blocks
 # the meeting.
@@ -50,7 +50,7 @@ try {
     }
 } catch { Write-Host "Could not start the memory database; continuing without memory." -ForegroundColor Yellow }
 
-& $exe listen --coach
+& $exe start --coach
 
 $transcripts = Join-Path $env:USERPROFILE "call-scribe\transcripts"
 Write-Host ""

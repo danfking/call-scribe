@@ -1,5 +1,5 @@
 # Launcher for the "Call Scribe" desktop shortcut: starts live captions with both the
-# realtime coach panel and far-side speaker identification (`listen --speakers --coach`). Brings
+# realtime coach panel and far-side speaker identification (`start --speakers --coach`). Brings
 # up the local services best-effort first — Ollama (coach inference) and the Timescale +
 # pgvector database (coach memory + voiceprints so named speakers persist) — then runs the
 # session. Press Enter in the window to stop; the full-quality transcript is written, then
@@ -56,7 +56,7 @@ try {
 
 # Speaker models must be present (scripts\coach-pull-speaker-models.ps1). If they are not,
 # the app falls back to the plain "Others" label rather than failing.
-& $exe listen --speakers --coach
+& $exe start --speakers --coach
 
 $transcripts = Join-Path $env:USERPROFILE "call-scribe\transcripts"
 Write-Host ""

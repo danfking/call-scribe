@@ -30,7 +30,7 @@ for (var i = 0; i < args.Length; i++)
         case "--min-speaker-seconds": minSpeaker = double.Parse(Arg(ref i)); break;
         case "--me-speech-threshold": meSpeechThreshold = double.Parse(Arg(ref i)); break;
         // Apply the after-meeting speaker-consolidation pass to the replayed transcript, so the
-        // emitted labels match what a real `listen` would persist after #35's stop-time fold. With
+        // emitted labels match what a real `start` would persist after #35's stop-time fold. With
         // a value, A/B that merge distance; bare, use the configured SpeakerConsolidationDistance.
         case "--consolidate": consolidate = true; if (i + 1 < args.Length && double.TryParse(args[i + 1], out var cd)) { consolidateDistance = cd; i++; } break;
         case "--consolidate-min-support": consolidateMinSupport = int.Parse(Arg(ref i)); break;
@@ -91,7 +91,7 @@ await captions.CompleteAsync();
 
 // After-meeting speaker consolidation (#35): fold the fragmented session labels with the whole
 // recording's stable centroids, then map the emitted captions through the result, mirroring what a
-// real `listen` persists at stop. Done before disposing the resolver, which owns the centroids.
+// real `start` persists at stop. Done before disposing the resolver, which owns the centroids.
 IReadOnlyDictionary<string, string> remap = new Dictionary<string, string>();
 if (consolidate && speakerId is not null)
 {

@@ -1,5 +1,5 @@
 # Pull the local models the coach uses (via Ollama) and bring up the memory database.
-# Run once before `call-scribe listen --coach`. Models match the AppConfig defaults;
+# Run once before `call-scribe start --coach`. Models match the AppConfig defaults;
 # override with parameters if you've changed them in `call-scribe config`.
 #
 #   ./scripts/coach-pull-models.ps1
@@ -24,4 +24,4 @@ if (-not $SkipDb) {
     docker compose -f $compose up -d
 }
 
-Write-Host "Done. Run: call-scribe listen --coach" -ForegroundColor Green
+Write-Host "Done. Run: call-scribe start --coach" -ForegroundColor Green
