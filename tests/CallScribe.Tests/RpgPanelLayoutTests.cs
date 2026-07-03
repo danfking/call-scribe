@@ -54,10 +54,10 @@ public class RpgPanelLayoutTests
         var text = display.RenderRpgToText(100);
 
         // The fill is pure background colour (invisible in this colourless render); what the
-        // plain text pins is the bar frame and the reading centred inside it, at the 9-cell
-        // width the test host's fallback window yields.
-        Assert.Contains("[  24/30  ]", text);
-        Assert.Contains("[  2/10   ]", text);
+        // plain text pins is the bar's end caps and the reading centred between them, at the
+        // 9-cell width the test host's fallback window yields.
+        Assert.Contains("|  24/30  |", text);
+        Assert.Contains("|  2/10   |", text);
     }
 
     [Fact]

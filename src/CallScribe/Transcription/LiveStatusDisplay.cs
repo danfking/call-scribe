@@ -826,12 +826,13 @@ public sealed class LiveStatusDisplay : IDisposable
     private static string TrimName(string name, int max = 14) =>
         name.Length <= max ? name : name[..(max - 1)] + "…";
 
-    /// <summary>A bracketed meter as Spectre markup: the fill is a background-colour wash over
+    /// <summary>A framed meter as Spectre markup: the fill is a background-colour wash over
     /// space cells (terminal-drawn rectangles, so it renders uniformly in any font, unlike
-    /// glyphs), the empty portion is bare, and grey brackets frame the extent. The reading
-    /// overlays the middle: digits over filled cells render on the fill colour, digits over
-    /// empty cells render bold white on none, so the fill boundary stays visible even when it
-    /// lands mid-label ("[[" renders a literal bracket).</summary>
+    /// glyphs), the empty portion is bare, and grey '|' end caps mark the extent (full-height
+    /// strokes, so they read as the bar's ends rather than punctuation). The reading overlays
+    /// the middle: digits over filled cells render on the fill colour, digits over empty cells
+    /// render bold white on none, so the fill boundary stays visible even when it lands
+    /// mid-label.</summary>
     private static string BarMarkup(int value, int max, int width, string colour)
     {
         var label = $"{Math.Max(0, value)}/{Math.Max(0, max)}";
@@ -841,11 +842,11 @@ public sealed class LiveStatusDisplay : IDisposable
         var start = (width - label.Length) / 2;
         // Black text carries best on the bright fills; blue is dark enough to need white.
         var textOnFill = colour == "blue" ? "white" : "black";
-        var markup = new StringBuilder("[grey][[[/]");
+        var markup = new StringBuilder("[grey]|[/]");
         AppendCells(0, start);
         AppendLabel();
         AppendCells(start + label.Length, width);
-        markup.Append("[grey]]][/]");
+        markup.Append("[grey]|[/]");
         return markup.ToString();
 
         void AppendCells(int from, int to)
