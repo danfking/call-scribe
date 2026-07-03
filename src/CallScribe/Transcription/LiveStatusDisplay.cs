@@ -25,6 +25,11 @@ public sealed class LiveStatusDisplay : IDisposable
     private bool _showRpg;
     private RpgPanelState? _rpg;
     private readonly List<RpgEventLine> _rpgEvents = [];
+    // When each card's numbers last moved, for the brief border flash that points at the
+    // change (the card order is stable, so the flash is what draws the eye).
+    private readonly Dictionary<string, DateTime> _rpgCardChanged = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _rpgBossChanged;
+    private static readonly TimeSpan RpgFlashDuration = TimeSpan.FromSeconds(1.5);
     private (string Text, string Colour)? _coachActivity;
     private volatile bool _running;
     private Task? _liveTask;
@@ -173,8 +178,42 @@ public sealed class LiveStatusDisplay : IDisposable
     /// stream.</summary>
     public void UpdateRpg(RpgPanelState state)
     {
-        lock (_lock) _rpg = state;
+        lock (_lock)
+        {
+            // Diff against the previous snapshot so the changed cards can flash. The first
+            // snapshot flashes nothing; a newly joined member counts as a change.
+            if (_rpg is { } prev)
+            {
+                var now = DateTime.Now;
+                var previous = prev.Party.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+                foreach (var row in state.Party)
+                {
+                    if (!previous.TryGetValue(row.Name, out var old)
+                        || old.Hp != row.Hp || old.Mp != row.Mp || old.Level != row.Level)
+                    {
+                        _rpgCardChanged[row.Name] = now;
+                    }
+                }
+                if (prev.Boss.Hp != state.Boss.Hp || prev.Boss.MaxHp != state.Boss.MaxHp)
+                {
+                    _rpgBossChanged = now;
+                }
+            }
+            _rpg = state;
+        }
         _dirty = true;
+    }
+
+    /// <summary>Whether a card's change flash is currently active (test seam: border colours
+    /// are invisible in the colourless test render).</summary>
+    internal bool CardChangedRecently(string name)
+    {
+        lock (_lock) return DateTime.Now - _rpgCardChanged.GetValueOrDefault(name) < RpgFlashDuration;
+    }
+
+    internal bool BossChangedRecently()
+    {
+        lock (_lock) return DateTime.Now - _rpgBossChanged < RpgFlashDuration;
     }
 
     /// <summary>Add a narrated RPG event line ("Priya's question staggers the boss"). Colour is
@@ -762,13 +801,35 @@ public sealed class LiveStatusDisplay : IDisposable
         var rightWidth = Math.Max(34, total / 3);
         var leftWidth = total - rightWidth - 1;
 
+        // A just-changed card flashes its border (member colour; white for the boss) for a
+        // moment, then settles back: the stack order is stable, so the flash is the pointer.
+        var now = DateTime.Now;
+        bool Flashing(DateTime at) => now - at < RpgFlashDuration;
+
         var cards = new List<IRenderable>();
         var visible = Math.Min(state.Party.Count, RpgPartyPanes);
         // Inside a card: column width minus borders and padding. The numbers overlay the bars,
-        // so the fixed text ("HP [] MP []") is just 11 cells; the bars absorb the rest. The
+        // so the fixed text ("HP || MP ||") is just 11 cells; the bars absorb the rest. The
         // floor keeps a worst-case "999/999" reading inside its bar.
         var inner = rightWidth - 4;
         var barWidth = Math.Clamp((inner - 11) / 2, 9, 18);
+
+        var boss = state.Boss;
+        // The boss card leads the stack (the enemy tops the battle screen). Its bar spans the
+        // card; the reading overlays it too. A text tag, not a glyph: skull/emoji glyphs are
+        // double-width in some fonts and collide with the name.
+        var bossBarWidth = Math.Clamp(inner - 2, 9, 60);
+        var bossContent = BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red");
+        if (boss.MobNames.Count > 0)
+        {
+            bossContent += $"\n[grey]mobs: {TrimName(string.Join(", ", boss.MobNames), inner - 6).EscapeMarkup()}[/]";
+        }
+        cards.Add(new Panel(new Markup(bossContent))
+            .Header($"[bold red] BOSS {TrimName(boss.Name, 20).EscapeMarkup()} [/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Flashing(_rpgBossChanged) ? Color.White : Color.Red)
+            .Expand());
+
         for (var i = 0; i < visible; i++)
         {
             var p = state.Party[i];
@@ -778,28 +839,15 @@ public sealed class LiveStatusDisplay : IDisposable
             var content =
                 $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} "
                 + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")}";
+            var border = Flashing(_rpgCardChanged.GetValueOrDefault(p.Name))
+                ? Style.Parse(p.Colour).Foreground
+                : Color.Grey;
             cards.Add(new Panel(new Markup(content))
                 .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} Lvl{p.Level} [/]{overflow}")
                 .Border(BoxBorder.Rounded)
-                .BorderColor(Color.Grey)
+                .BorderColor(border)
                 .Expand());
         }
-
-        var boss = state.Boss;
-        // The boss bar spans the card (minus brackets); its reading overlays it too.
-        var bossBarWidth = Math.Clamp(inner - 2, 9, 60);
-        var bossContent = BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red");
-        if (boss.MobNames.Count > 0)
-        {
-            bossContent += $"\n[grey]mobs: {TrimName(string.Join(", ", boss.MobNames), inner - 6).EscapeMarkup()}[/]";
-        }
-        // A text tag, not a glyph: skull/emoji glyphs are double-width in some fonts and
-        // collide with the name.
-        cards.Add(new Panel(new Markup(bossContent))
-            .Header($"[bold red] BOSS {TrimName(boss.Name, 20).EscapeMarkup()} [/]")
-            .Border(BoxBorder.Rounded)
-            .BorderColor(Color.Red)
-            .Expand());
 
         // Battle-log style, no timestamps (the transcript above carries the real clock).
         // Depth matches the card stack; pad with blanks so the log pane bottoms out with it.

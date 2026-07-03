@@ -126,13 +126,16 @@ public sealed class RpgEngine : IDisposable
         _ => "white",
     };
 
-    /// <summary>Map the game state to the display-owned presentation record: most recently
-    /// active members first (they hold the visible rows), stable colours by join order.</summary>
+    /// <summary>Map the game state to the display-owned presentation record. Card order is
+    /// deliberately stable: self first, then everyone else by who spoke first. Ordering by
+    /// recent activity made the cards jump around, which was jarring to glance at.</summary>
     private RpgPanelState BuildPanelState()
     {
+        var self = _selfName ?? LiveCaptionEngine.MeLabel;
         var rows = _state.Party
             .Select((member, index) => (Member: member, Index: index))
-            .OrderByDescending(x => x.Member.LastSpokeAt)
+            .OrderBy(x => string.Equals(x.Member.Name, self, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(x => x.Index)
             .Select(x => new RpgPartyRow(
                 ClassIcon(x.Member.Class),
                 x.Member.Name,

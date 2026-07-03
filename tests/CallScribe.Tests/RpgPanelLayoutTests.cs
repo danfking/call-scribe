@@ -28,11 +28,43 @@ public class RpgPanelLayoutTests
         using var display = DisplayWithSnapshot();
         var lines = display.RenderRpgToText(100).Split('\n');
 
-        // The log pane's header and the first character card's header share the top row:
-        // that is what makes it a two-column layout rather than stacked panels.
+        // The log pane's header and the top card's header share the top row: that is what
+        // makes it a two-column layout rather than stacked panels. The boss card leads.
         var top = Array.Find(lines, l => l.Contains("boss fight"));
         Assert.NotNull(top);
-        Assert.Contains("Dan Lvl1", top);
+        Assert.Contains("BOSS The Meeting", top);
+    }
+
+    [Fact]
+    public void Cards_KeepAStableOrder_BossThenPartyAsGiven()
+    {
+        using var display = DisplayWithSnapshot();
+        var text = display.RenderRpgToText(100);
+
+        // The engine hands the party over pre-ordered (self first, then first-spoke); the
+        // display's only ordering decision is the boss on top.
+        var boss = text.IndexOf("BOSS The Meeting", StringComparison.Ordinal);
+        var dan = text.IndexOf("Dan Lvl1", StringComparison.Ordinal);
+        var priya = text.IndexOf("Priya Lvl1", StringComparison.Ordinal);
+        Assert.True(boss < dan && dan < priya);
+    }
+
+    [Fact]
+    public void ChangedCards_FlashBriefly()
+    {
+        using var display = DisplayWithSnapshot();
+        Assert.False(display.CardChangedRecently("Dan")); // first snapshot: nothing flashes
+
+        display.UpdateRpg(new RpgPanelState(
+            [
+                new RpgPartyRow("·", "Dan", 1, 22, 30, 2, 10, "cyan"), // HP moved
+                new RpgPartyRow("·", "Priya", 1, 30, 30, 10, 10, "yellow"), // unchanged
+            ],
+            new RpgBossRow("The Meeting", 89, 125, []))); // boss HP moved
+
+        Assert.True(display.CardChangedRecently("Dan"));
+        Assert.False(display.CardChangedRecently("Priya"));
+        Assert.True(display.BossChangedRecently());
     }
 
     [Fact]

@@ -28,6 +28,23 @@ public class RpgEngineTests
     }
 
     [Fact]
+    public async Task Party_KeepsAStableOrder_SelfFirstThenFirstSpoke()
+    {
+        using var engine = new RpgEngine(new RpgRules(), selfName: "Dan");
+        var snapshots = new List<RpgPanelState>();
+        engine.StateChanged += snapshots.Add;
+
+        // Priya speaks before Dan; Gavin speaks last and most recently. The order must stay
+        // self-first then first-spoke, not follow recent activity.
+        engine.Observe(new CaptionEvent(T0, LiveCaptionEngine.OthersLabel, "First point.", "Priya"));
+        engine.Observe(new CaptionEvent(T0.AddSeconds(2), LiveCaptionEngine.MeLabel, "Second point."));
+        engine.Observe(new CaptionEvent(T0.AddSeconds(4), LiveCaptionEngine.OthersLabel, "Third point.", "Gavin"));
+        await engine.CompleteAsync();
+
+        Assert.Equal(["Dan", "Priya", "Gavin"], snapshots[^1].Party.Select(p => p.Name));
+    }
+
+    [Fact]
     public async Task MeChannel_PlaysAsTheChannelLabel_WithoutASelfName()
     {
         using var engine = new RpgEngine(new RpgRules());
