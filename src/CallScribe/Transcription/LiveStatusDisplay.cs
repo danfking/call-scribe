@@ -764,10 +764,11 @@ public sealed class LiveStatusDisplay : IDisposable
 
         var cards = new List<IRenderable>();
         var visible = Math.Min(state.Party.Count, RpgPartyPanes);
-        // Inside a card: column width minus borders and padding. The card line's fixed text
-        // ("HP [] nn/nn MP [] nn/nn") is 23 cells at worst, leaving the rest for two bars.
+        // Inside a card: column width minus borders and padding. The numbers overlay the bars,
+        // so the fixed text ("HP [] MP []") is just 11 cells; the bars absorb the rest. The
+        // floor keeps a worst-case "999/999" reading inside its bar.
         var inner = rightWidth - 4;
-        var barWidth = Math.Clamp((inner - 23) / 2, 3, 10);
+        var barWidth = Math.Clamp((inner - 11) / 2, 9, 18);
         for (var i = 0; i < visible; i++)
         {
             var p = state.Party[i];
@@ -775,8 +776,8 @@ public sealed class LiveStatusDisplay : IDisposable
                 ? $" [grey](+{state.Party.Count - visible})[/]"
                 : "";
             var content =
-                $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} [grey]{p.Hp}/{p.MaxHp}[/] "
-                + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")} [grey]{p.Mp}/{p.MaxMp}[/]";
+                $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} "
+                + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")}";
             cards.Add(new Panel(new Markup(content))
                 .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} L{p.Level} [/]{overflow}")
                 .Border(BoxBorder.Rounded)
@@ -785,9 +786,9 @@ public sealed class LiveStatusDisplay : IDisposable
         }
 
         var boss = state.Boss;
-        // Brackets (2) + space + up to "999/999" (7) leaves inner - 10 cells for the fill.
-        var bossBarWidth = Math.Clamp(inner - 10, 5, 40);
-        var bossContent = $"{BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red")} [grey]{boss.Hp}/{boss.MaxHp}[/]";
+        // The boss bar spans the card (minus brackets); its reading overlays it too.
+        var bossBarWidth = Math.Clamp(inner - 2, 9, 60);
+        var bossContent = BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red");
         if (boss.MobNames.Count > 0)
         {
             bossContent += $"\n[grey]mobs: {TrimName(string.Join(", ", boss.MobNames), inner - 6).EscapeMarkup()}[/]";
@@ -825,11 +826,32 @@ public sealed class LiveStatusDisplay : IDisposable
     private static string TrimName(string name, int max = 14) =>
         name.Length <= max ? name : name[..(max - 1)] + "…";
 
-    /// <summary>A bracketed segment meter as Spectre markup: grey brackets frame the coloured
-    /// fill, so the bar keeps its shape even where colour support is poor ("[[" renders a
-    /// literal bracket).</summary>
-    private static string BarMarkup(int value, int max, int width, string colour) =>
-        $"[grey][[[/][{colour}]{AsciiBar(value, max, width)}[/][grey]]][/]";
+    /// <summary>A bracketed segment meter as Spectre markup with the numbers overlaid mid-bar,
+    /// e.g. "[===24/30==--]": grey brackets frame the coloured '='/'-' fill (plain ASCII, the
+    /// only glyphs every monospace font renders as discrete segments), and the reading replaces
+    /// the cells it covers in bold white, so it contrasts with fill and empty cells alike,
+    /// wherever the boundary lands ("[[" renders a literal bracket).</summary>
+    private static string BarMarkup(int value, int max, int width, string colour)
+    {
+        var label = $"{Math.Max(0, value)}/{Math.Max(0, max)}";
+        if (width <= label.Length) return $"[bold white]{label.EscapeMarkup()}[/]";
+
+        var filled = FilledCells(value, max, width);
+        var start = (width - label.Length) / 2;
+        var markup = new StringBuilder("[grey][[[/]");
+        AppendSegments(0, start);
+        markup.Append($"[bold white]{label}[/]");
+        AppendSegments(start + label.Length, width);
+        markup.Append("[grey]]][/]");
+        return markup.ToString();
+
+        void AppendSegments(int from, int to)
+        {
+            var fillTo = Math.Clamp(filled, from, to);
+            if (fillTo > from) markup.Append($"[{colour}]{new string('=', fillTo - from)}[/]");
+            if (to > fillTo) markup.Append($"[grey]{new string('-', to - fillTo)}[/]");
+        }
+    }
 
     /// <summary>HP bar colour by remaining fraction: healthy green, hurting yellow, critical red.</summary>
     private static string BarColour(int value, int max)
@@ -838,21 +860,19 @@ public sealed class LiveStatusDisplay : IDisposable
         return fraction > 0.5 ? "green" : fraction > 0.25 ? "yellow" : "red";
     }
 
-    /// <summary>value/max rendered as a width-cell ASCII segment fill, e.g. "========--", the
-    /// Angband/MUD meter style. Deliberately plain '='/'-': block-element glyphs are the most
-    /// font-dependent characters there are (they fused into featureless rectangles in practice),
-    /// while these render as discrete segments in every monospace font. A nonzero value always
-    /// shows at least one segment, and a less-than-full value never shows a full bar, so
-    /// "almost dead" and "almost done" stay visible at a glance.</summary>
-    internal static string AsciiBar(int value, int max, int width)
+    /// <summary>How many of a width-cell meter's cells are filled for value/max. A nonzero
+    /// value always fills at least one cell, and a less-than-full value never fills the whole
+    /// bar, so "almost dead" and "almost done" stay visible at a glance.</summary>
+    internal static int FilledCells(int value, int max, int width)
     {
-        if (width <= 0) return "";
+        if (width <= 0) return 0;
         var clamped = max > 0 ? Math.Clamp(value, 0, max) : 0;
         var filled = max > 0 ? (int)Math.Round(width * clamped / (double)max) : 0;
         if (clamped > 0 && filled == 0) filled = 1;
         if (clamped < max && filled == width) filled = width - 1;
-        return new string('=', filled) + new string('-', width - filled);
+        return filled;
     }
+
 
     /// <summary>Render the RPG area to plain text at the given console width. A test seam:
     /// the live panel is interactive-only, so without this the pane layout is verifiable only
