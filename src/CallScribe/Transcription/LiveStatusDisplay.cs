@@ -779,7 +779,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} "
                 + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")}";
             cards.Add(new Panel(new Markup(content))
-                .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} L{p.Level} [/]{overflow}")
+                .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} Lvl{p.Level} [/]{overflow}")
                 .Border(BoxBorder.Rounded)
                 .BorderColor(Color.Grey)
                 .Expand());

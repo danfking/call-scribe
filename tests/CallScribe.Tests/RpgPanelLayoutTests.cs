@@ -32,7 +32,7 @@ public class RpgPanelLayoutTests
         // that is what makes it a two-column layout rather than stacked panels.
         var top = Array.Find(lines, l => l.Contains("boss fight"));
         Assert.NotNull(top);
-        Assert.Contains("Dan L1", top);
+        Assert.Contains("Dan Lvl1", top);
     }
 
     [Fact]
@@ -41,8 +41,8 @@ public class RpgPanelLayoutTests
         using var display = DisplayWithSnapshot();
         var text = display.RenderRpgToText(100);
 
-        Assert.Contains("Dan L1", text);
-        Assert.Contains("Priya L1", text);
+        Assert.Contains("Dan Lvl1", text);
+        Assert.Contains("Priya Lvl1", text);
         Assert.Contains("BOSS The Meeting", text);
         Assert.Contains("95/125", text);
     }
