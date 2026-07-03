@@ -16,7 +16,7 @@ internal static class CaptureBackend
 
     public static bool SupportsLiveCapture => Current.SupportsLiveCapture;
 
-    /// <summary>Shown when a live-capture command (record, listen, devices, enroll-me) runs on a
+    /// <summary>Shown when a live-capture command (record, start, devices, enroll-me) runs on a
     /// platform without capture support.</summary>
     public const string UnsupportedMessage =
         "Live audio capture is only available on Windows. This build can still transcribe existing " +

@@ -1,4 +1,4 @@
-# Pull the ONNX models the speaker-identification feature needs (listen --speakers and
+# Pull the ONNX models the speaker-identification feature needs (start --speakers and
 # coach diarize/enroll). They download into the call-scribe models directory under
 # LocalAppData, matching the AppConfig defaults. Run once.
 #
@@ -49,4 +49,4 @@ if (-not (Test-Path $segOut)) {
 }
 
 Write-Host "Done. Speaker models are in $ModelsDir" -ForegroundColor Green
-Write-Host "Enable with: call-scribe listen --speakers   (or set speakerIdEnabled in config)" -ForegroundColor Green
+Write-Host "Enable with: call-scribe start --speakers   (or set speakerIdEnabled in config)" -ForegroundColor Green

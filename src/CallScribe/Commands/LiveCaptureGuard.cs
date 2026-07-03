@@ -3,7 +3,7 @@ using Spectre.Console;
 
 namespace CallScribe.Commands;
 
-/// <summary>Shared front-door check for the commands that need live audio capture (record, listen,
+/// <summary>Shared front-door check for the commands that need live audio capture (record, start,
 /// devices, coach enroll-me). One copy of the message and the test, so the off-Windows experience
 /// stays consistent across commands.</summary>
 internal static class LiveCaptureGuard

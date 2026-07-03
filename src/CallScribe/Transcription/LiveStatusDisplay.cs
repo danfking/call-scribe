@@ -6,7 +6,7 @@ namespace CallScribe.Transcription;
 
 public enum TrackState { Listening, Hearing, Transcribing }
 
-/// <summary>The listen-mode UI. When attached to a real console it renders a live
+/// <summary>The start-command live UI. When attached to a real console it renders a live
 /// dashboard (a header with elapsed time, a card per track showing its state, and
 /// a transcript panel that updates in place). When output is redirected it falls
 /// back to plain caption lines so pipes and logs still work.</summary>

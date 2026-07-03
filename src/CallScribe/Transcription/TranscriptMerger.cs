@@ -35,7 +35,7 @@ public static class TranscriptMerger
     /// and speaker, so this just groups consecutive same-speaker lines under a stamped header.</summary>
     /// <param name="duration">The recorded meeting length for the frontmatter. When null it is
     /// approximated by the span between the first and last caption, which omits leading/trailing
-    /// silence; pass the real capture duration when it is known (the listen flow has it).</param>
+    /// silence; pass the real capture duration when it is known (the start flow has it).</param>
     public static string MergeLive(
         string stem, IReadOnlyList<(DateTime At, string Speaker, string Text)> lines, string outputDir,
         TimeSpan? duration = null)

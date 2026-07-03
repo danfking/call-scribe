@@ -27,10 +27,6 @@ public static class ListenCommand
         {
             Description = "Stop automatically after N seconds (default: Enter stops)",
         };
-        var noTranscribeOption = new Option<bool>("--no-transcribe")
-        {
-            Description = "Record only: write no transcript at all (skip both the live save and the batch pass)",
-        };
         var fullOption = new Option<bool>("--full")
         {
             Description = "Run the slow, high-accuracy batch transcription after stopping (whisper-large + VAD) "
@@ -47,12 +43,15 @@ public static class ListenCommand
                           + "transcript after the meeting (needs the speaker models; experimental).",
         };
 
-        var command = new Command("listen",
-            "Record with live captions on screen; Enter stops and saves the live transcript (use --full for the slow high-accuracy batch pass)");
+        var command = new Command("start",
+            "Record the call: live captions on screen while it runs, then Enter stops and saves the transcript "
+            + "(records both tracks, transcribes, and shows captions in one step; use --full for the slow "
+            + "high-accuracy batch pass)");
+        // Keep the old verb working for the desktop shortcut and muscle memory; it routes to the same handler.
+        command.Aliases.Add("listen");
         command.Options.Add(labelOption);
         command.Options.Add(liveModelOption);
         command.Options.Add(secondsOption);
-        command.Options.Add(noTranscribeOption);
         command.Options.Add(fullOption);
         command.Options.Add(coachOption);
         command.Options.Add(speakersOption);
@@ -60,7 +59,6 @@ public static class ListenCommand
             parseResult.GetValue(labelOption),
             parseResult.GetValue(liveModelOption)!,
             parseResult.GetValue(secondsOption),
-            parseResult.GetValue(noTranscribeOption),
             parseResult.GetValue(fullOption),
             parseResult.GetValue(coachOption),
             parseResult.GetValue(speakersOption),
@@ -68,7 +66,7 @@ public static class ListenCommand
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool noTranscribe, bool full, bool coachFlag, bool speakersFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool full, bool coachFlag, bool speakersFlag, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
 
@@ -99,9 +97,9 @@ public static class ListenCommand
             // transcript is persisted for the stop-time export), but not the advice panel, so it runs
             // the coach with a stub advisor (no Ollama, no panel) purely to persist segments.
             var wantCoachPanel = coachFlag || config.CoachEnabled;
-            // The live transcript is the default artifact; only --full (batch pass) or --no-transcribe
-            // (record only) opt out of saving it, and only then do we not need the transcript store.
-            var wantLiveTranscript = !full && !noTranscribe;
+            // The live transcript is the default artifact; only --full (batch pass) opts out of saving
+            // it, and only then do we not need the transcript store.
+            var wantLiveTranscript = !full;
             if (wantCoachPanel || wantLiveTranscript)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
@@ -218,9 +216,6 @@ public static class ListenCommand
                 catch { /* consolidation is best-effort; never block the transcript */ }
             }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
-
-            // Record only: no transcript artifact at all.
-            if (noTranscribe) return 0;
 
             // Default: save the live transcript (already consolidated above) as the .md artifact and
             // refine coaching profiles from it. This skips the slow whisper-large batch pass, which on

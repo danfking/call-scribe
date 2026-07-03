@@ -22,7 +22,7 @@ public sealed class AppConfig
 
     /// <summary>Small model for live captions during recording (tiny.en/base.en/small.en).
     /// small.en is the default: benchmarking showed it cuts live word-error materially over
-    /// base.en for a little extra latency. Override per-run with <c>listen --live-model</c>.</summary>
+    /// base.en for a little extra latency. Override per-run with <c>start --live-model</c>.</summary>
     [JsonPropertyName("liveModel")]
     public string LiveModel { get; set; } = "small.en";
 
@@ -55,7 +55,7 @@ public sealed class AppConfig
     // "nothing leaves your machine" still holds. Fields beyond CoachEnabled are
     // consumed by later phases (local inference, memory).
 
-    /// <summary>Enable the coach panel by default on `listen` (same as passing --coach).</summary>
+    /// <summary>Enable the coach panel by default on `start` (same as passing --coach).</summary>
     [JsonPropertyName("coachEnabled")]
     public bool CoachEnabled { get; set; }
 
@@ -94,7 +94,7 @@ public sealed class AppConfig
 
     /// <summary>Keep a per-person markdown coaching profile that the coach uses to tailor advice to
     /// whoever is in the call, refreshed automatically at the end of each meeting. On by default, but
-    /// only does anything while the coach itself is running (listen --coach / coach replay).</summary>
+    /// only does anything while the coach itself is running (start --coach / coach replay).</summary>
     [JsonPropertyName("coachingProfilesEnabled")]
     public bool CoachingProfilesEnabled { get; set; } = true;
 
