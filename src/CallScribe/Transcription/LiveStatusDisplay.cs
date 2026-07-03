@@ -743,6 +743,7 @@ public sealed class LiveStatusDisplay : IDisposable
         }
 
         const int barWidth = 10;
+        const int bossBarWidth = 20; // double weight: the boss is the fight
         var lines = new List<string>();
 
         var visible = Math.Min(state.Party.Count, RpgPartyRowsMax);
@@ -750,11 +751,10 @@ public sealed class LiveStatusDisplay : IDisposable
         for (var i = 0; i < visible; i++)
         {
             var p = state.Party[i];
-            var hpColour = BarColour(p.Hp, p.MaxHp);
             var line =
                 $"[{p.Colour}]{p.ClassIcon} {TrimName(p.Name).PadRight(nameWidth).EscapeMarkup()}[/] [grey]{$"L{p.Level}",-3}[/]  "
-                + $"[grey]HP[/] [{hpColour}]{BlockBar(p.Hp, p.MaxHp, barWidth)}[/] [grey]{p.Hp,3}/{p.MaxHp,-3}[/] "
-                + $"[grey]MP[/] [blue]{BlockBar(p.Mp, p.MaxMp, barWidth)}[/] [grey]{p.Mp,3}/{p.MaxMp,-3}[/]";
+                + $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} [grey]{p.Hp,3}/{p.MaxHp,-3}[/] "
+                + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")} [grey]{p.Mp,3}/{p.MaxMp,-3}[/]";
             if (i == visible - 1 && state.Party.Count > visible)
             {
                 line += $"  [grey](+{state.Party.Count - visible} more)[/]";
@@ -766,15 +766,18 @@ public sealed class LiveStatusDisplay : IDisposable
         var mobs = boss.MobNames.Count > 0
             ? $"  [grey]mobs: {TrimName(string.Join(", ", boss.MobNames), 40).EscapeMarkup()}[/]"
             : "";
+        // A text tag, not a glyph: skull/emoji glyphs are double-width in some fonts and
+        // collide with the name.
         lines.Add(
-            $"[red]☠ {TrimName(boss.Name).PadRight(nameWidth).EscapeMarkup()}[/] {"",-3}  "
-            + $"[grey]HP[/] [red]{BlockBar(boss.Hp, boss.MaxHp, barWidth)}[/] [grey]{boss.Hp,3}/{boss.MaxHp,-3}[/]{mobs}");
+            $"[bold red]BOSS[/] [red]{TrimName(boss.Name).EscapeMarkup()}[/]  "
+            + $"{BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red")} [grey]{boss.Hp,3}/{boss.MaxHp,-3}[/]{mobs}");
 
+        // Battle-log style, no timestamps (the transcript above carries the real clock).
         var slice = _rpgEvents.Count > RpgEventRows
             ? _rpgEvents.GetRange(_rpgEvents.Count - RpgEventRows, RpgEventRows)
             : _rpgEvents;
         lines.AddRange(slice.Select(e =>
-            $"[grey]{e.At:HH:mm:ss}[/]  [{e.Colour}]{e.Text.EscapeMarkup()}[/]"));
+            $"[grey]>[/] [{e.Colour}]{e.Text.EscapeMarkup()}[/]"));
 
         return new Markup(string.Join("\n", lines));
     }
@@ -783,6 +786,12 @@ public sealed class LiveStatusDisplay : IDisposable
     private static string TrimName(string name, int max = 14) =>
         name.Length <= max ? name : name[..(max - 1)] + "…";
 
+    /// <summary>A bracketed segment meter as Spectre markup: grey brackets frame the coloured
+    /// fill, so the bar keeps its shape even where colour support is poor ("[[" renders a
+    /// literal bracket).</summary>
+    private static string BarMarkup(int value, int max, int width, string colour) =>
+        $"[grey][[[/][{colour}]{AsciiBar(value, max, width)}[/][grey]]][/]";
+
     /// <summary>HP bar colour by remaining fraction: healthy green, hurting yellow, critical red.</summary>
     private static string BarColour(int value, int max)
     {
@@ -790,17 +799,20 @@ public sealed class LiveStatusDisplay : IDisposable
         return fraction > 0.5 ? "green" : fraction > 0.25 ? "yellow" : "red";
     }
 
-    /// <summary>value/max rendered as width block-glyph cells, e.g. "███░░░░░░░". A nonzero
-    /// value always shows at least one filled cell, and a less-than-full value never shows a
-    /// full bar, so "almost dead" and "almost done" stay visible at a glance.</summary>
-    internal static string BlockBar(int value, int max, int width)
+    /// <summary>value/max rendered as a width-cell ASCII segment fill, e.g. "========--", the
+    /// Angband/MUD meter style. Deliberately plain '='/'-': block-element glyphs are the most
+    /// font-dependent characters there are (they fused into featureless rectangles in practice),
+    /// while these render as discrete segments in every monospace font. A nonzero value always
+    /// shows at least one segment, and a less-than-full value never shows a full bar, so
+    /// "almost dead" and "almost done" stay visible at a glance.</summary>
+    internal static string AsciiBar(int value, int max, int width)
     {
         if (width <= 0) return "";
         var clamped = max > 0 ? Math.Clamp(value, 0, max) : 0;
         var filled = max > 0 ? (int)Math.Round(width * clamped / (double)max) : 0;
         if (clamped > 0 && filled == 0) filled = 1;
         if (clamped < max && filled == width) filled = width - 1;
-        return new string('█', filled) + new string('░', width - filled);
+        return new string('=', filled) + new string('-', width - filled);
     }
 
     private static int SafeWindowHeight()
