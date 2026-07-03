@@ -140,12 +140,23 @@ public sealed class RpgEngine : IDisposable
                 ClassIcon(x.Member.Class),
                 x.Member.Name,
                 x.Member.Level,
+                XpProgress(x.Member),
                 x.Member.Hp, x.Member.MaxHp,
                 x.Member.Mp, x.Member.MaxMp,
                 RowColour(x.Member.Name, x.Index)))
             .ToList();
         var boss = new RpgBossRow(_state.Boss.Name, _state.Boss.Hp, _state.Boss.MaxHp, [.. _state.Mobs]);
         return new RpgPanelState(rows, boss);
+    }
+
+    /// <summary>Fraction of the way from the current level to the next. Level derives from XP
+    /// as 1 + floor(sqrt(xp/100)), so level L spans [100(L-1)^2, 100L^2) XP.</summary>
+    internal static double XpProgress(CharacterState member)
+    {
+        var level = member.Level;
+        var floor = 100.0 * (level - 1) * (level - 1);
+        var ceiling = 100.0 * level * level;
+        return Math.Clamp((member.Xp - floor) / (ceiling - floor), 0, 1);
     }
 
     private string RowColour(string name, int joinIndex) =>

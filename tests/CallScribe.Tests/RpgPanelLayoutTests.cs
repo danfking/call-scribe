@@ -14,8 +14,8 @@ public class RpgPanelLayoutTests
         display.EnableRpgPanel();
         display.UpdateRpg(new RpgPanelState(
             [
-                new RpgPartyRow("·", "Dan", 1, 24, 30, 2, 10, "cyan"),
-                new RpgPartyRow("·", "Priya", 1, 30, 30, 10, 10, "yellow"),
+                new RpgPartyRow("·", "Dan", 1, 0.4, 24, 30, 2, 10, "cyan"),
+                new RpgPartyRow("·", "Priya", 1, 0.0, 30, 30, 10, 10, "yellow"),
             ],
             new RpgBossRow("The Meeting", 95, 125, [])));
         display.PrintRpgEvent(T0, "green", "Decisive blow by Dan! The boss staggers (6 dmg)");
@@ -44,8 +44,8 @@ public class RpgPanelLayoutTests
         // The engine hands the party over pre-ordered (self first, then first-spoke); the
         // display's only ordering decision is the boss on top.
         var boss = text.IndexOf("BOSS The Meeting", StringComparison.Ordinal);
-        var dan = text.IndexOf("Dan Lvl1", StringComparison.Ordinal);
-        var priya = text.IndexOf("Priya Lvl1", StringComparison.Ordinal);
+        var dan = text.IndexOf("1  Dan", StringComparison.Ordinal);
+        var priya = text.IndexOf("1  Priya", StringComparison.Ordinal);
         Assert.True(boss < dan && dan < priya);
     }
 
@@ -57,8 +57,8 @@ public class RpgPanelLayoutTests
 
         display.UpdateRpg(new RpgPanelState(
             [
-                new RpgPartyRow("·", "Dan", 1, 22, 30, 2, 10, "cyan"), // HP moved
-                new RpgPartyRow("·", "Priya", 1, 30, 30, 10, 10, "yellow"), // unchanged
+                new RpgPartyRow("·", "Dan", 1, 0.4, 22, 30, 2, 10, "cyan"), // HP moved
+                new RpgPartyRow("·", "Priya", 1, 0.0, 30, 30, 10, 10, "yellow"), // unchanged
             ],
             new RpgBossRow("The Meeting", 89, 125, []))); // boss HP moved
 
@@ -73,8 +73,8 @@ public class RpgPanelLayoutTests
         using var display = DisplayWithSnapshot();
         var text = display.RenderRpgToText(100);
 
-        Assert.Contains("Dan Lvl1", text);
-        Assert.Contains("Priya Lvl1", text);
+        Assert.Contains("1  Dan", text);
+        Assert.Contains("1  Priya", text);
         Assert.Contains("BOSS The Meeting", text);
         Assert.Contains("95/125", text);
     }

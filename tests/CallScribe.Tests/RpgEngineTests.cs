@@ -27,6 +27,17 @@ public class RpgEngineTests
                      - RpgRules.Tuning.QuestionBossDamage, last.Boss.Hp);
     }
 
+    [Theory]
+    [InlineData(0, 0.0)]     // fresh level 1
+    [InlineData(50, 0.5)]    // halfway to level 2 (at 100)
+    [InlineData(100, 0.0)]   // just reached level 2 (next at 400)
+    [InlineData(250, 0.5)]   // halfway through level 2
+    public void XpProgress_TracksTheLevelCurve(int xp, double expected)
+    {
+        var member = new CharacterState("Gavin") { Xp = xp };
+        Assert.Equal(expected, RpgEngine.XpProgress(member), precision: 9);
+    }
+
     [Fact]
     public async Task Party_KeepsAStableOrder_SelfFirstThenFirstSpoke()
     {

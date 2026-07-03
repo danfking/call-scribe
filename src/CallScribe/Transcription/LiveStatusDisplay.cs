@@ -843,7 +843,7 @@ public sealed class LiveStatusDisplay : IDisposable
                 ? Style.Parse(p.Colour).Foreground
                 : Color.Grey;
             cards.Add(new Panel(new Markup(content))
-                .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} Lvl{p.Level} [/]{overflow}")
+                .Header($" {BadgeMarkup(p.Level, p.XpProgress, p.Colour)}[{p.Colour}] {TrimName(p.Name).EscapeMarkup()} [/]{overflow}")
                 .Border(BoxBorder.Rounded)
                 .BorderColor(border)
                 .Expand());
@@ -912,6 +912,24 @@ public sealed class LiveStatusDisplay : IDisposable
             if (overFill > 0) markup.Append($"[bold {textOnFill} on {colour}]{label[..overFill]}[/]");
             if (overFill < label.Length) markup.Append($"[bold white]{label[overFill..]}[/]");
         }
+    }
+
+    /// <summary>The level badge: the level number on a small background chip that doubles as
+    /// an XP meter, washing over left-to-right in the member's colour as progress toward the
+    /// next level accrues. The unfilled portion keeps a dim grey background so the badge shape
+    /// reads even at 0%. Same split-text treatment as the bars, so the fill boundary shows
+    /// through the digits.</summary>
+    private static string BadgeMarkup(int level, double xpProgress, string colour)
+    {
+        var text = $" {level} ";
+        var filled = (int)Math.Round(text.Length * Math.Clamp(xpProgress, 0, 1));
+        if (filled == text.Length && xpProgress < 1) filled = text.Length - 1;
+
+        var textOnFill = colour == "blue" ? "white" : "black";
+        var markup = new StringBuilder();
+        if (filled > 0) markup.Append($"[bold {textOnFill} on {colour}]{text[..filled]}[/]");
+        if (filled < text.Length) markup.Append($"[bold white on grey19]{text[filled..]}[/]");
+        return markup.ToString();
     }
 
     /// <summary>HP bar colour by remaining fraction: healthy green, hurting yellow, critical red.</summary>

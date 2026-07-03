@@ -9,11 +9,13 @@ public sealed record RpgPanelState(
     RpgBossRow Boss);
 
 /// <summary>One party member's line: class icon and colour are presentation hints chosen by the
-/// game module; the display renders the bars from the raw numbers.</summary>
+/// game module; the display renders the bars from the raw numbers. XpProgress is the fraction
+/// (0..1) of the way from this level to the next, shown as the level badge's fill.</summary>
 public sealed record RpgPartyRow(
     string ClassIcon,
     string Name,
     int Level,
+    double XpProgress,
     int Hp,
     int MaxHp,
     int Mp,
