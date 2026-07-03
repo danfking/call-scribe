@@ -28,4 +28,10 @@ root.Subcommands.Add(DevicesCommand.Create());
 root.Subcommands.Add(ConfigCommand.Create());
 root.Subcommands.Add(CoachCommand.Create());
 
+// No command given: open the interactive home screen (menu + typed palette). Under a pipe or a
+// TTY-less host (Docker without -it) input is redirected, so fall through to the usual help output
+// instead of blocking on a prompt. Explicit `call-scribe <command>` always takes the direct path.
+if (args.Length == 0 && !Console.IsInputRedirected)
+    return await CallScribe.Commands.InteractiveShell.RunAsync(root, CancellationToken.None);
+
 return await root.Parse(args).InvokeAsync();

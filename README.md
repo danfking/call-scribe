@@ -17,6 +17,7 @@ Right, so it has to actually listen to the output device.
 ## Usage
 
 ```
+call-scribe                            # no command: open the interactive home screen
 call-scribe start --label standup      # record with live captions; Enter saves the transcript
 call-scribe start --full               # same, but run the slow high-accuracy batch pass at the end
 call-scribe record start --label sync  # detached background recording
@@ -26,6 +27,8 @@ call-scribe transcribe latest          # transcribe the newest recording
 call-scribe devices                    # list audio devices
 call-scribe config                     # show settings
 ```
+
+Run `call-scribe` with no command to open the home screen: an arrow-key menu (Start, Transcribe, Background recording, Devices, Config, Coach) plus a typed command palette for anything else. Each choice runs the same command you would type directly, then returns to the menu. Ctrl-C stops a running command and returns to the menu. Under a pipe or a non-interactive host it prints help instead, so scripts and Docker are unaffected.
 
 `start` records both tracks, shows live captions from a small model (small.en by default), and on stop saves that live transcript by default (fast, no extra wait). It replaces the old separate `record` and `listen` verbs: there is no record-without-transcribe path any more. Add `--full` to run the slow, high-accuracy batch pass with the large model instead, which also does offline speaker diarization and interactive naming. The live transcript is held in the coach memory DB, so the default path needs that DB running (it falls back to the batch pass with a note if it is not). For background recording without the on-screen dashboard, use `record start` / `record stop`.
 
