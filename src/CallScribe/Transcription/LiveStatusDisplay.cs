@@ -828,9 +828,11 @@ public sealed class LiveStatusDisplay : IDisposable
 
     /// <summary>A bracketed segment meter as Spectre markup with the numbers overlaid mid-bar,
     /// e.g. "[===24/30==--]": grey brackets frame the coloured '='/'-' fill (plain ASCII, the
-    /// only glyphs every monospace font renders as discrete segments), and the reading replaces
-    /// the cells it covers in bold white, so it contrasts with fill and empty cells alike,
-    /// wherever the boundary lands ("[[" renders a literal bracket).</summary>
+    /// only glyphs every monospace font renders as discrete segments). The reading replaces the
+    /// cells it covers, but keeps the meter legible through itself: over filled cells the digits
+    /// render on the fill colour as a background, over empty cells they render bold white on
+    /// none, so the fill boundary stays visible even when it lands mid-label ("[[" renders a
+    /// literal bracket).</summary>
     private static string BarMarkup(int value, int max, int width, string colour)
     {
         var label = $"{Math.Max(0, value)}/{Math.Max(0, max)}";
@@ -838,9 +840,11 @@ public sealed class LiveStatusDisplay : IDisposable
 
         var filled = FilledCells(value, max, width);
         var start = (width - label.Length) / 2;
+        // Black text carries best on the bright fills; blue is dark enough to need white.
+        var textOnFill = colour == "blue" ? "white" : "black";
         var markup = new StringBuilder("[grey][[[/]");
         AppendSegments(0, start);
-        markup.Append($"[bold white]{label}[/]");
+        AppendLabel();
         AppendSegments(start + label.Length, width);
         markup.Append("[grey]]][/]");
         return markup.ToString();
@@ -850,6 +854,14 @@ public sealed class LiveStatusDisplay : IDisposable
             var fillTo = Math.Clamp(filled, from, to);
             if (fillTo > from) markup.Append($"[{colour}]{new string('=', fillTo - from)}[/]");
             if (to > fillTo) markup.Append($"[grey]{new string('-', to - fillTo)}[/]");
+        }
+
+        void AppendLabel()
+        {
+            // Split the reading at the fill boundary so each side takes its own styling.
+            var overFill = Math.Clamp(filled - start, 0, label.Length);
+            if (overFill > 0) markup.Append($"[bold {textOnFill} on {colour}]{label[..overFill]}[/]");
+            if (overFill < label.Length) markup.Append($"[bold white]{label[overFill..]}[/]");
         }
     }
 
