@@ -63,12 +63,13 @@ public sealed class LiveStatusDisplay : IDisposable
     private const int CoachAdviceRows = 6;
     private const int CoachPanelRows = CoachAdviceRows + 2; // advice + panel borders (activity is in the border now)
 
-    // The RPG panel replaces the coach panel's slot below the transcript when enabled: a few
-    // party rows (folding the overflow into a "+N more" suffix), the boss row, and a short
-    // scrolling event log. Taller than the coach panel because the roster needs the rows.
-    private const int RpgPartyRowsMax = 4;
-    private const int RpgEventRows = 3;
-    private const int RpgPanelRows = RpgPartyRowsMax + 1 + RpgEventRows + 2; // party + boss + events + borders
+    // The RPG area replaces the coach panel's slot below the transcript when enabled: the
+    // battle-log pane takes the left two thirds, and the right third stacks one bordered card
+    // per party member (overflow folded into a "+N" on the last card) plus the boss card.
+    // Each card is 3 rows (header border, one content line, bottom border), so the area's
+    // height tracks the party size; the log pane deepens to match.
+    private const int RpgPartyPanes = 4;
+    private const int RpgCardRows = 3;
 
     // Fixed rows the transcript leaves for everything that isn't its own content: the header rule,
     // its own borders, and the footer. The per-track cards row was removed (status moved into the
@@ -167,11 +168,11 @@ public sealed class LiveStatusDisplay : IDisposable
 
     /// <summary>Replace the RPG panel's party/boss snapshot. The state is a presentation-only
     /// record (see <see cref="RpgPanelState"/>) so this class stays independent of the Rpg
-    /// namespace. No plain-line fallback: when output is redirected the bars are meaningless,
-    /// so only the narrated events (via <see cref="PrintRpgEvent"/>) reach the stream.</summary>
+    /// namespace. No plain-line fallback: when output is redirected the snapshot is stored but
+    /// never rendered; only the narrated events (via <see cref="PrintRpgEvent"/>) reach the
+    /// stream.</summary>
     public void UpdateRpg(RpgPanelState state)
     {
-        if (!_interactive) return;
         lock (_lock) _rpg = state;
         _dirty = true;
     }
@@ -182,8 +183,9 @@ public sealed class LiveStatusDisplay : IDisposable
     {
         if (!_interactive)
         {
+            // Redirected: emit the plain (timestamped) line for pipes and logs. The event is
+            // still recorded below so the panel state stays consistent either way.
             AnsiConsole.MarkupLine($"[grey]{at:HH:mm:ss}[/] [{colour}]rpg ▸[/] {text.EscapeMarkup()}");
-            return;
         }
         lock (_lock)
         {
@@ -582,12 +584,7 @@ public sealed class LiveStatusDisplay : IDisposable
             }
             else if (_showRpg)
             {
-                var rpg = new Panel(BuildRpg())
-                    .Header("[red] boss fight [/]")
-                    .Border(BoxBorder.Rounded)
-                    .BorderColor(Color.Grey)
-                    .Expand();
-                body = new Rows(transcript, rpg);
+                body = new Rows(transcript, BuildRpg());
             }
             else if (_showAdvice)
             {
@@ -684,7 +681,7 @@ public sealed class LiveStatusDisplay : IDisposable
         // to several rows; budget by estimated rendered rows (not entry count) so one long turn
         // can't push the footer off screen.
         var reserved = _answer != null ? CoachPanelRows
-            : _showRpg ? RpgPanelRows
+            : _showRpg ? RpgReservedRows()
             : _showAdvice ? CoachPanelRows
             : 0;
         var rowBudget = Math.Max(3, SafeWindowHeight() - ChromeRows - reserved);
@@ -733,53 +730,95 @@ public sealed class LiveStatusDisplay : IDisposable
         return new Markup(string.Join("\n", lines));
     }
 
-    /// <summary>The RPG panel body: party rows (bounded, overflow folded into "+N more"), the
-    /// boss row, then the most recent narrated events.</summary>
+    /// <summary>Rows the RPG area needs below the transcript: 3 per card (party, capped, plus
+    /// the boss), tracked dynamically because the party grows as people speak. Callers hold
+    /// <see cref="_lock"/> (this reads <see cref="_rpg"/>).</summary>
+    private int RpgReservedRows()
+    {
+        if (_rpg is not { } state) return 3; // the pre-snapshot placeholder panel
+        var cards = Math.Min(state.Party.Count, RpgPartyPanes) + 1; // party + boss
+        return cards * RpgCardRows + (state.Boss.MobNames.Count > 0 ? 1 : 0);
+    }
+
+    /// <summary>The RPG area: the battle-log pane on the left two thirds, and the right third
+    /// stacking one card per party member plus the boss card. The log's depth follows the
+    /// stack's so the two columns bottom out together.</summary>
     private IRenderable BuildRpg()
     {
         if (_rpg is not { } state)
         {
-            return new Markup("[grey](the party assembles…)[/]");
+            return new Panel(new Markup("[grey](the party assembles…)[/]"))
+                .Header("[red] boss fight [/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Grey)
+                .Expand();
         }
 
-        const int barWidth = 10;
-        const int bossBarWidth = 20; // double weight: the boss is the fight
-        var lines = new List<string>();
+        // A fixed 2:1 split; Grid columns take explicit widths, so compute them from the
+        // window (minus a safety margin for the grid's own bookkeeping). The right column
+        // never drops below the width where minimum bars still fit on one line: a wrapped
+        // card grows a row and breaks the log/stack height sync.
+        var total = Math.Max(60, SafeWindowWidth() - 2);
+        var rightWidth = Math.Max(34, total / 3);
+        var leftWidth = total - rightWidth - 1;
 
-        var visible = Math.Min(state.Party.Count, RpgPartyRowsMax);
-        var nameWidth = Math.Max(6, state.Party.Take(visible).Select(p => TrimName(p.Name).Length).DefaultIfEmpty(6).Max());
+        var cards = new List<IRenderable>();
+        var visible = Math.Min(state.Party.Count, RpgPartyPanes);
+        // Inside a card: column width minus borders and padding. The card line's fixed text
+        // ("HP [] nn/nn MP [] nn/nn") is 23 cells at worst, leaving the rest for two bars.
+        var inner = rightWidth - 4;
+        var barWidth = Math.Clamp((inner - 23) / 2, 3, 10);
         for (var i = 0; i < visible; i++)
         {
             var p = state.Party[i];
-            var line =
-                $"[{p.Colour}]{p.ClassIcon} {TrimName(p.Name).PadRight(nameWidth).EscapeMarkup()}[/] [grey]{$"L{p.Level}",-3}[/]  "
-                + $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} [grey]{p.Hp,3}/{p.MaxHp,-3}[/] "
-                + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")} [grey]{p.Mp,3}/{p.MaxMp,-3}[/]";
-            if (i == visible - 1 && state.Party.Count > visible)
-            {
-                line += $"  [grey](+{state.Party.Count - visible} more)[/]";
-            }
-            lines.Add(line);
+            var overflow = i == visible - 1 && state.Party.Count > visible
+                ? $" [grey](+{state.Party.Count - visible})[/]"
+                : "";
+            var content =
+                $"[grey]HP[/] {BarMarkup(p.Hp, p.MaxHp, barWidth, BarColour(p.Hp, p.MaxHp))} [grey]{p.Hp}/{p.MaxHp}[/] "
+                + $"[grey]MP[/] {BarMarkup(p.Mp, p.MaxMp, barWidth, "blue")} [grey]{p.Mp}/{p.MaxMp}[/]";
+            cards.Add(new Panel(new Markup(content))
+                .Header($"[{p.Colour}] {p.ClassIcon} {TrimName(p.Name).EscapeMarkup()} L{p.Level} [/]{overflow}")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Grey)
+                .Expand());
         }
 
         var boss = state.Boss;
-        var mobs = boss.MobNames.Count > 0
-            ? $"  [grey]mobs: {TrimName(string.Join(", ", boss.MobNames), 40).EscapeMarkup()}[/]"
-            : "";
+        // Brackets (2) + space + up to "999/999" (7) leaves inner - 10 cells for the fill.
+        var bossBarWidth = Math.Clamp(inner - 10, 5, 40);
+        var bossContent = $"{BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red")} [grey]{boss.Hp}/{boss.MaxHp}[/]";
+        if (boss.MobNames.Count > 0)
+        {
+            bossContent += $"\n[grey]mobs: {TrimName(string.Join(", ", boss.MobNames), inner - 6).EscapeMarkup()}[/]";
+        }
         // A text tag, not a glyph: skull/emoji glyphs are double-width in some fonts and
         // collide with the name.
-        lines.Add(
-            $"[bold red]BOSS[/] [red]{TrimName(boss.Name).EscapeMarkup()}[/]  "
-            + $"{BarMarkup(boss.Hp, boss.MaxHp, bossBarWidth, "red")} [grey]{boss.Hp,3}/{boss.MaxHp,-3}[/]{mobs}");
+        cards.Add(new Panel(new Markup(bossContent))
+            .Header($"[bold red] BOSS {TrimName(boss.Name, 20).EscapeMarkup()} [/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Red)
+            .Expand());
 
         // Battle-log style, no timestamps (the transcript above carries the real clock).
-        var slice = _rpgEvents.Count > RpgEventRows
-            ? _rpgEvents.GetRange(_rpgEvents.Count - RpgEventRows, RpgEventRows)
+        // Depth matches the card stack; pad with blanks so the log pane bottoms out with it.
+        var logRows = Math.Max(1, RpgReservedRows() - 2);
+        var slice = _rpgEvents.Count > logRows
+            ? _rpgEvents.GetRange(_rpgEvents.Count - logRows, logRows)
             : _rpgEvents;
-        lines.AddRange(slice.Select(e =>
-            $"[grey]>[/] [{e.Colour}]{e.Text.EscapeMarkup()}[/]"));
+        var logLines = slice.Select(e => $"[grey]>[/] [{e.Colour}]{e.Text.EscapeMarkup()}[/]").ToList();
+        while (logLines.Count < logRows) logLines.Add("");
+        var log = new Panel(new Markup(string.Join("\n", logLines)))
+            .Header("[red] boss fight [/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .Expand();
 
-        return new Markup(string.Join("\n", lines));
+        var grid = new Grid();
+        grid.AddColumn(new GridColumn().Width(leftWidth).Padding(0, 0, 1, 0));
+        grid.AddColumn(new GridColumn().Width(rightWidth).Padding(0, 0, 0, 0));
+        grid.AddRow(log, new Rows(cards));
+        return grid;
     }
 
     /// <summary>Cap a display name so one long name (or mob list) cannot blow the row layout.</summary>
@@ -813,6 +852,25 @@ public sealed class LiveStatusDisplay : IDisposable
         if (clamped > 0 && filled == 0) filled = 1;
         if (clamped < max && filled == width) filled = width - 1;
         return new string('=', filled) + new string('-', width - filled);
+    }
+
+    /// <summary>Render the RPG area to plain text at the given console width. A test seam:
+    /// the live panel is interactive-only, so without this the pane layout is verifiable only
+    /// by eye. Note <see cref="BuildRpg"/> sizes its columns from <see cref="SafeWindowWidth"/>
+    /// (the fallback 100 under a redirected test host), not from <paramref name="width"/>.</summary>
+    internal string RenderRpgToText(int width)
+    {
+        var writer = new StringWriter();
+        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Ansi = AnsiSupport.No,
+            ColorSystem = ColorSystemSupport.NoColors,
+            Interactive = InteractionSupport.No,
+            Out = new AnsiConsoleOutput(writer),
+        });
+        console.Profile.Width = width;
+        lock (_lock) console.Write(BuildRpg());
+        return writer.ToString();
     }
 
     private static int SafeWindowHeight()
