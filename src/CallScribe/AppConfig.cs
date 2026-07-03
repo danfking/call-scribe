@@ -103,6 +103,15 @@ public sealed class AppConfig
     [JsonPropertyName("coachingProfilesDir")]
     public string? CoachingProfilesDir { get; set; }
 
+    // --- RPG mode (experimental) -----------------------------------------------
+    // Play the meeting as a co-op boss fight in the dashboard. Purely cosmetic fun
+    // over the same caption stream the coach watches; replaces the coach panel.
+
+    /// <summary>Enable the RPG panel by default on `start` (same as passing --rpg). Takes the
+    /// coach panel's slot below the transcript when both are enabled.</summary>
+    [JsonPropertyName("rpgEnabled")]
+    public bool RpgEnabled { get; set; }
+
     // --- Speaker identification (experimental) --------------------------------
     // Tell apart and name the far-side speakers so the coach reasons per person.
     // Local acoustic embeddings (sherpa-onnx ONNX models); degrades to the plain

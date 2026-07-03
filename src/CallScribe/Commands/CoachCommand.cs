@@ -313,7 +313,7 @@ public static class CoachCommand
         using var coach = new CoachEngine(advisor, memory, meetingId);
         coach.AdviceEmitted += a => display.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
 
-        await MockMeetingDriver.ReplayAsync(script, display, coach, realtime: !fast, ct).ConfigureAwait(false);
+        await MockMeetingDriver.ReplayAsync(script, display, coach.Observe, realtime: !fast, ct).ConfigureAwait(false);
         await coach.CompleteAsync().ConfigureAwait(false);
         display.Shutdown();
 

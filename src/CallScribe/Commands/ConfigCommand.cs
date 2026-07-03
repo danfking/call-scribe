@@ -93,6 +93,10 @@ public static class ConfigCommand
                 c.CoachingProfilesDir = v == null ? null : Path.GetFullPath(v);
             }),
 
+        new("rpgEnabled", () => "false",
+            c => c.RpgEnabled.ToString().ToLowerInvariant(),
+            (c, v) => c.RpgEnabled = v != null && bool.Parse(v), StartsGroup: true),
+
         new("speakerIdEnabled", () => "false",
             c => c.SpeakerIdEnabled.ToString().ToLowerInvariant(),
             (c, v) => c.SpeakerIdEnabled = v != null && bool.Parse(v), StartsGroup: true),

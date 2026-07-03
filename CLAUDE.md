@@ -30,9 +30,10 @@ dotnet test tests/CallScribe.Tests --filter "FullyQualifiedName~SpeakerResolverT
 Namespace dependency direction (arrows = "depends on"):
 
 ```
-Commands -> Audio, Transcription, Coach
+Commands -> Audio, Transcription, Coach, Rpg
 Coach    -> Transcription   (for the LiveCaptionEngine.OthersLabel / MeLabel constants, CaptionEvent)
-Audio, Transcription do NOT depend on Coach.
+Rpg      -> Transcription   (CaptionEvent, TokenOverlap, and the display-owned RpgPanelState)
+Audio, Transcription do NOT depend on Coach or Rpg.
 ```
 
 - **Audio** (`CaptureEngine`, `CaptureTrack`): two WASAPI captures (loopback + mic) into two WAVs.
@@ -47,6 +48,10 @@ Audio, Transcription do NOT depend on Coach.
 - **Coach** (`CoachEngine`, `LlmAdvisor`/`StubAdvisor`, `Memory/`, `Speaker/`): watches the same caption
   stream, persists the live transcript to Postgres, and advises via Ollama. `Speaker/` resolves far-side
   voices (live single-pass clustering vs authoritative offline diarization).
+- **Rpg** (`RpgEngine`, `RpgRules`, `GameState`): optional fun mode (`start --rpg` / `rpgEnabled`) that
+  plays the meeting as a co-op boss fight in the dashboard, replacing the coach panel's slot.
+  Deterministic rules score the caption stream (questions cast, decisions hit the boss, circular talk
+  heals it); test with `rpg replay samples/rpg/boss-fight.jsonl`.
 
 ## Conventions
 

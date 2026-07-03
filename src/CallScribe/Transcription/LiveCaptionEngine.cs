@@ -114,6 +114,17 @@ public sealed class LiveCaptionEngine : IDisposable
     public void SetCoachActivity(string text, string colour) =>
         _display.SetCoachActivity(text, colour);
 
+    /// <summary>Turn on the RPG panel below the transcript (replaces the coach panel's slot).</summary>
+    public void EnableRpgPanel() => _display.EnableRpgPanel();
+
+    /// <summary>Forward the RPG module's party/boss snapshot to the dashboard. The state record
+    /// is display-owned, keeping this class independent of the Rpg namespace.</summary>
+    public void UpdateRpg(RpgPanelState state) => _display.UpdateRpg(state);
+
+    /// <summary>Forward a narrated RPG event line to the dashboard's event log.</summary>
+    public void PrintRpgEvent(DateTime at, string colour, string text) =>
+        _display.PrintRpgEvent(at, colour, text);
+
     /// <summary>Callback for the dashboard's /assign-name command (rename + persist a speaker).</summary>
     public Func<string, string, CancellationToken, Task<bool>>? OnAssignName
     {
