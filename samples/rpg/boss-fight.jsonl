@@ -1,0 +1,25 @@
+{"t": 0, "speaker": "Gavin", "text": "Morning everyone, let's get started with the sprint review."}
+{"t": 3, "speaker": "Me", "text": "Morning. I want to get through the deployment blocker today."}
+{"t": 7, "speaker": "Priya", "text": "Before that, can we check where the migration script landed?"}
+{"t": 11, "speaker": "Gavin", "text": "It merged on Friday, but the staging run has not happened yet."}
+{"t": 15, "speaker": "Me", "text": "Why hasn't the staging run started? Is the pipeline stuck?"}
+{"t": 19, "speaker": "Priya", "text": "The pipeline is waiting on the config change from the platform team."}
+{"t": 23, "speaker": "Gavin", "text": "Okay. I'll chase the platform team right after this call."}
+{"t": 27, "speaker": "Me", "text": "What about the API timeout issue from last week?"}
+{"t": 31, "speaker": "Priya", "text": "Did anyone catch the football last night? What a finish."}
+{"t": 35, "speaker": "Gavin", "text": "Ha, tempting, but we are on the clock here."}
+{"t": 39, "speaker": "Me", "text": "Agreed. Back to the timeout issue."}
+{"t": 43, "speaker": "Priya", "text": "The timeout only happens when the cache is cold, so warming it on deploy should fix it."}
+{"t": 47, "speaker": "Me", "text": "Let's warm the cache in the deploy step then."}
+{"t": 51, "speaker": "Priya", "text": "And the migration script, are we confident in the rollback?"}
+{"t": 56, "speaker": "Gavin", "text": "Hang on, why hasn't the staging run started? Is the pipeline stuck?"}
+{"t": 60, "speaker": "Me", "text": "We covered that already, it is the platform config change."}
+{"t": 115, "speaker": "Gavin", "text": "Sorry, I went quiet there, I was checking the pipeline. It is running now."}
+{"t": 119, "speaker": "Priya", "text": "Nice. Should we make the rollback check an action item?"}
+{"t": 123, "speaker": "Me", "text": "Yes. Action item: Priya verifies the rollback script before Thursday."}
+{"t": 127, "speaker": "Gavin", "text": "One more thing about the release notes before we wrap."}
+{"t": 130, "speaker": "Gavin", "text": "I want them drafted before the deploy goes out."}
+{"t": 133, "speaker": "Gavin", "text": "The last release shipped without any notes at all."}
+{"t": 136, "speaker": "Gavin", "text": "Support had no idea what changed and the tickets piled up."}
+{"t": 139, "speaker": "Gavin", "text": "So notes first, deploy second, every time."}
+{"t": 143, "speaker": "Me", "text": "Sounds good. We'll draft them tomorrow. Let's call it there."}

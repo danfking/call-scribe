@@ -22,6 +22,9 @@ public sealed class LiveStatusDisplay : IDisposable
     private string _model = "";
     private bool _started;
     private bool _showAdvice;
+    private bool _showRpg;
+    private RpgPanelState? _rpg;
+    private readonly List<RpgEventLine> _rpgEvents = [];
     private (string Text, string Colour)? _coachActivity;
     private volatile bool _running;
     private Task? _liveTask;
@@ -60,6 +63,13 @@ public sealed class LiveStatusDisplay : IDisposable
     private const int CoachAdviceRows = 6;
     private const int CoachPanelRows = CoachAdviceRows + 2; // advice + panel borders (activity is in the border now)
 
+    // The RPG panel replaces the coach panel's slot below the transcript when enabled: a few
+    // party rows (folding the overflow into a "+N more" suffix), the boss row, and a short
+    // scrolling event log. Taller than the coach panel because the roster needs the rows.
+    private const int RpgPartyRowsMax = 4;
+    private const int RpgEventRows = 3;
+    private const int RpgPanelRows = RpgPartyRowsMax + 1 + RpgEventRows + 2; // party + boss + events + borders
+
     // Fixed rows the transcript leaves for everything that isn't its own content: the header rule,
     // its own borders, and the footer. The per-track cards row was removed (status moved into the
     // transcript border), so this is smaller than before.
@@ -77,6 +87,7 @@ public sealed class LiveStatusDisplay : IDisposable
 
     private readonly record struct Caption(DateTime At, string Colour, string Label, string Text);
     private readonly record struct Advice(DateTime At, string Colour, string Glyph, string Text);
+    private readonly record struct RpgEventLine(DateTime At, string Colour, string Text);
     private readonly record struct AskState(string Question, string? Answer);
 
     public LiveStatusDisplay()
@@ -133,10 +144,56 @@ public sealed class LiveStatusDisplay : IDisposable
     }
 
     /// <summary>Turn on the coach advice column (rendered to the right of the
-    /// transcript). Call before the dashboard starts.</summary>
+    /// transcript). Call before the dashboard starts. A no-op while the RPG panel is
+    /// enabled: the two contend for the same slot below the transcript, and RPG wins.</summary>
     public void EnableAdvicePanel()
     {
-        lock (_lock) _showAdvice = true;
+        lock (_lock)
+        {
+            if (!_showRpg) _showAdvice = true;
+        }
+    }
+
+    /// <summary>Turn on the RPG panel below the transcript, replacing the coach panel (they
+    /// share the slot). Call before the dashboard starts.</summary>
+    public void EnableRpgPanel()
+    {
+        lock (_lock)
+        {
+            _showRpg = true;
+            _showAdvice = false;
+        }
+    }
+
+    /// <summary>Replace the RPG panel's party/boss snapshot. The state is a presentation-only
+    /// record (see <see cref="RpgPanelState"/>) so this class stays independent of the Rpg
+    /// namespace. No plain-line fallback: when output is redirected the bars are meaningless,
+    /// so only the narrated events (via <see cref="PrintRpgEvent"/>) reach the stream.</summary>
+    public void UpdateRpg(RpgPanelState state)
+    {
+        if (!_interactive) return;
+        lock (_lock) _rpg = state;
+        _dirty = true;
+    }
+
+    /// <summary>Add a narrated RPG event line ("Priya's question staggers the boss"). Colour is
+    /// passed as a primitive, like <see cref="PrintAdvice"/>.</summary>
+    public void PrintRpgEvent(DateTime at, string colour, string text)
+    {
+        if (!_interactive)
+        {
+            AnsiConsole.MarkupLine($"[grey]{at:HH:mm:ss}[/] [{colour}]rpg ▸[/] {text.EscapeMarkup()}");
+            return;
+        }
+        lock (_lock)
+        {
+            _rpgEvents.Add(new RpgEventLine(at, colour, text));
+            if (_rpgEvents.Count > MaxCaptions)
+            {
+                _rpgEvents.RemoveRange(0, _rpgEvents.Count - MaxCaptions);
+            }
+        }
+        _dirty = true;
     }
 
     /// <summary>Add a coach advice item. Presentation hints (colour, glyph) are passed
@@ -519,9 +576,18 @@ public sealed class LiveStatusDisplay : IDisposable
             IRenderable body = transcript;
             if (_answer is { } ask)
             {
-                // An /ask answer overlay takes the slot below the transcript (over the coach) until
-                // dismissed with Esc, so the layout stays stable.
+                // An /ask answer overlay takes the slot below the transcript (over the coach or
+                // the RPG panel) until dismissed with Esc, so the layout stays stable.
                 body = new Rows(transcript, BuildAnswerPanel(ask));
+            }
+            else if (_showRpg)
+            {
+                var rpg = new Panel(BuildRpg())
+                    .Header("[red] boss fight [/]")
+                    .Border(BoxBorder.Rounded)
+                    .BorderColor(Color.Grey)
+                    .Expand();
+                body = new Rows(transcript, rpg);
             }
             else if (_showAdvice)
             {
@@ -617,7 +683,10 @@ public sealed class LiveStatusDisplay : IDisposable
         // and (when shown) the coach panel below. Entries are speaker-coalesced so they can wrap
         // to several rows; budget by estimated rendered rows (not entry count) so one long turn
         // can't push the footer off screen.
-        var reserved = _showAdvice || _answer != null ? CoachPanelRows : 0;
+        var reserved = _answer != null ? CoachPanelRows
+            : _showRpg ? RpgPanelRows
+            : _showAdvice ? CoachPanelRows
+            : 0;
         var rowBudget = Math.Max(3, SafeWindowHeight() - ChromeRows - reserved);
         var lineWidth = Math.Max(20, SafeWindowWidth() - 4); // minus panel border/padding
 
@@ -662,6 +731,76 @@ public sealed class LiveStatusDisplay : IDisposable
         var lines = slice.Select(a =>
             $"[grey]{a.At:HH:mm:ss}[/]  [{a.Colour}]{a.Glyph}[/] {a.Text.EscapeMarkup()}");
         return new Markup(string.Join("\n", lines));
+    }
+
+    /// <summary>The RPG panel body: party rows (bounded, overflow folded into "+N more"), the
+    /// boss row, then the most recent narrated events.</summary>
+    private IRenderable BuildRpg()
+    {
+        if (_rpg is not { } state)
+        {
+            return new Markup("[grey](the party assembles…)[/]");
+        }
+
+        const int barWidth = 10;
+        var lines = new List<string>();
+
+        var visible = Math.Min(state.Party.Count, RpgPartyRowsMax);
+        var nameWidth = Math.Max(6, state.Party.Take(visible).Select(p => TrimName(p.Name).Length).DefaultIfEmpty(6).Max());
+        for (var i = 0; i < visible; i++)
+        {
+            var p = state.Party[i];
+            var hpColour = BarColour(p.Hp, p.MaxHp);
+            var line =
+                $"[{p.Colour}]{p.ClassIcon} {TrimName(p.Name).PadRight(nameWidth).EscapeMarkup()}[/] [grey]{$"L{p.Level}",-3}[/]  "
+                + $"[grey]HP[/] [{hpColour}]{BlockBar(p.Hp, p.MaxHp, barWidth)}[/] [grey]{p.Hp,3}/{p.MaxHp,-3}[/] "
+                + $"[grey]MP[/] [blue]{BlockBar(p.Mp, p.MaxMp, barWidth)}[/] [grey]{p.Mp,3}/{p.MaxMp,-3}[/]";
+            if (i == visible - 1 && state.Party.Count > visible)
+            {
+                line += $"  [grey](+{state.Party.Count - visible} more)[/]";
+            }
+            lines.Add(line);
+        }
+
+        var boss = state.Boss;
+        var mobs = boss.MobNames.Count > 0
+            ? $"  [grey]mobs: {TrimName(string.Join(", ", boss.MobNames), 40).EscapeMarkup()}[/]"
+            : "";
+        lines.Add(
+            $"[red]☠ {TrimName(boss.Name).PadRight(nameWidth).EscapeMarkup()}[/] {"",-3}  "
+            + $"[grey]HP[/] [red]{BlockBar(boss.Hp, boss.MaxHp, barWidth)}[/] [grey]{boss.Hp,3}/{boss.MaxHp,-3}[/]{mobs}");
+
+        var slice = _rpgEvents.Count > RpgEventRows
+            ? _rpgEvents.GetRange(_rpgEvents.Count - RpgEventRows, RpgEventRows)
+            : _rpgEvents;
+        lines.AddRange(slice.Select(e =>
+            $"[grey]{e.At:HH:mm:ss}[/]  [{e.Colour}]{e.Text.EscapeMarkup()}[/]"));
+
+        return new Markup(string.Join("\n", lines));
+    }
+
+    /// <summary>Cap a display name so one long name (or mob list) cannot blow the row layout.</summary>
+    private static string TrimName(string name, int max = 14) =>
+        name.Length <= max ? name : name[..(max - 1)] + "…";
+
+    /// <summary>HP bar colour by remaining fraction: healthy green, hurting yellow, critical red.</summary>
+    private static string BarColour(int value, int max)
+    {
+        var fraction = max > 0 ? value / (double)max : 0;
+        return fraction > 0.5 ? "green" : fraction > 0.25 ? "yellow" : "red";
+    }
+
+    /// <summary>value/max rendered as width block-glyph cells, e.g. "███░░░░░░░". A nonzero
+    /// value always shows at least one filled cell, and a less-than-full value never shows a
+    /// full bar, so "almost dead" and "almost done" stay visible at a glance.</summary>
+    internal static string BlockBar(int value, int max, int width)
+    {
+        if (width <= 0) return "";
+        var clamped = max > 0 ? Math.Clamp(value, 0, max) : 0;
+        var filled = max > 0 ? (int)Math.Round(width * clamped / (double)max) : 0;
+        if (clamped > 0 && filled == 0) filled = 1;
+        if (clamped < max && filled == width) filled = width - 1;
+        return new string('█', filled) + new string('░', width - filled);
     }
 
     private static int SafeWindowHeight()

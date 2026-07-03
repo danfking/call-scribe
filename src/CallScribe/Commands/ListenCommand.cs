@@ -4,6 +4,7 @@ using CallScribe.Coach;
 using CallScribe.Coach.Llm;
 using CallScribe.Coach.Memory;
 using CallScribe.Coach.Speaker;
+using CallScribe.Rpg;
 using CallScribe.Transcription;
 using Spectre.Console;
 using Whisper.net.Ggml;
@@ -42,6 +43,11 @@ public static class ListenCommand
             Description = "Identify far-side speakers by voice: name live captions and attribute the "
                           + "transcript after the meeting (needs the speaker models; experimental).",
         };
+        var rpgOption = new Option<bool>("--rpg")
+        {
+            Description = "Play the meeting as a co-op RPG boss fight: participants get HP/MP, decisions "
+                          + "damage the boss, circular talk heals it (replaces the coach panel; experimental).",
+        };
 
         var command = new Command("start",
             "Record the call: live captions on screen while it runs, then Enter stops and saves the transcript "
@@ -55,6 +61,7 @@ public static class ListenCommand
         command.Options.Add(fullOption);
         command.Options.Add(coachOption);
         command.Options.Add(speakersOption);
+        command.Options.Add(rpgOption);
         command.SetAction((parseResult, ct) => RunAsync(
             parseResult.GetValue(labelOption),
             parseResult.GetValue(liveModelOption)!,
@@ -62,11 +69,12 @@ public static class ListenCommand
             parseResult.GetValue(fullOption),
             parseResult.GetValue(coachOption),
             parseResult.GetValue(speakersOption),
+            parseResult.GetValue(rpgOption),
             ct));
         return command;
     }
 
-    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool full, bool coachFlag, bool speakersFlag, CancellationToken ct)
+    private static async Task<int> RunAsync(string? label, string liveModel, int? seconds, bool full, bool coachFlag, bool speakersFlag, bool rpgFlag, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
 
@@ -89,14 +97,24 @@ public static class ListenCommand
         CoachEngine? coach = null;
         IMemoryStore? coachMemory = null;
         SpeakerIdentity? speakerId = null;
+        RpgEngine? rpg = null;
         try
         {
+            // RPG mode and the coach panel contend for the same slot below the transcript; RPG
+            // wins (an explicit --rpg is a clear ask for this session's novelty, and erroring on
+            // a coachEnabled config would force a config edit). The coach engine still runs
+            // stubbed underneath for transcript persistence.
+            var wantRpg = rpgFlag || config.RpgEnabled;
             // The coach watches the same caption stream the dashboard renders. Opt-in via --coach
             // or config; the stub advisor needs no models, so this works offline. The default
             // (live-transcript) path also needs the coach's transcript store (that is where the live
             // transcript is persisted for the stop-time export), but not the advice panel, so it runs
             // the coach with a stub advisor (no Ollama, no panel) purely to persist segments.
-            var wantCoachPanel = coachFlag || config.CoachEnabled;
+            var wantCoachPanel = (coachFlag || config.CoachEnabled) && !wantRpg;
+            if (wantRpg && (coachFlag || config.CoachEnabled))
+            {
+                AnsiConsole.MarkupLine("[grey]RPG mode replaces the coach panel this session.[/]");
+            }
             // The live transcript is the default artifact; only --full (batch pass) opts out of saving
             // it, and only then do we not need the transcript store.
             var wantLiveTranscript = !full;
@@ -127,6 +145,15 @@ public static class ListenCommand
                     captions.SetCoachActivity(restText, restColour);
                 }
                 captions.CaptionEmitted += coach.Observe;
+            }
+
+            if (wantRpg)
+            {
+                rpg = new RpgEngine(new RpgRules(), selfName: config.SelfSpeakerName);
+                captions.EnableRpgPanel();
+                rpg.StateChanged += state => captions.UpdateRpg(state);
+                rpg.EventEmitted += (at, colour, text) => captions.PrintRpgEvent(at, colour, text);
+                captions.CaptionEmitted += rpg.Observe;
             }
 
             // Identify far-side speakers so live captions (and the coach) get names, not just
@@ -181,6 +208,10 @@ public static class ListenCommand
             {
                 // Captions are fully emitted now; drain any advice still in flight.
                 await coach.CompleteAsync().ConfigureAwait(false);
+            }
+            if (rpg != null)
+            {
+                await rpg.CompleteAsync().ConfigureAwait(false);
             }
             // Fold the meeting's fragmented live speaker labels now the whole recording is in, and
             // rewrite the persisted live transcript so the consolidated names flow through into the
@@ -268,6 +299,7 @@ public static class ListenCommand
         }
         finally
         {
+            rpg?.Dispose();
             coach?.Dispose();
             if (coachMemory != null) await coachMemory.DisposeAsync().ConfigureAwait(false);
             if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);

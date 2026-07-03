@@ -27,6 +27,7 @@ root.Subcommands.Add(TranscribeCommand.Create());
 root.Subcommands.Add(DevicesCommand.Create());
 root.Subcommands.Add(ConfigCommand.Create());
 root.Subcommands.Add(CoachCommand.Create());
+root.Subcommands.Add(RpgCommand.Create());
 
 // No command given: open the interactive home screen (menu + typed palette). Under a pipe or a
 // TTY-less host (Docker without -it) input is redirected, so fall through to the usual help output
