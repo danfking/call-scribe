@@ -195,6 +195,15 @@ public static class ConfigCommand
         return 0;
     }
 
+    /// <summary>The settable keys and their current display values, for the interactive shell's config
+    /// editor. Read-only: writes go back through `config set` so the validation in <see cref="Set"/>
+    /// stays the single path. Display values may contain Spectre markup (e.g. "[grey](default)[/]").</summary>
+    public static IReadOnlyList<(string Key, string Display)> ListSettings()
+    {
+        var config = AppConfig.Load();
+        return [.. Settings.Select(s => (s.Key, s.Value(config)))];
+    }
+
     private static bool LooksSynced(string path) =>
         path.Contains("OneDrive", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("Dropbox", StringComparison.OrdinalIgnoreCase) ||
