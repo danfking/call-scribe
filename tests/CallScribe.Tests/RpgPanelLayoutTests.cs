@@ -53,11 +53,11 @@ public class RpgPanelLayoutTests
         using var display = DisplayWithSnapshot();
         var text = display.RenderRpgToText(100);
 
-        // At the test host's fallback width the card bars are 9 cells: Dan's 24/30 HP fills 7
-        // and his 2/10 MP fills 2, with the reading replacing the middle cells of each. The
-        // exact strings pin the overlay math through the real render path.
-        Assert.Contains("[==24/30--]", text);
-        Assert.Contains("[==2/10---]", text);
+        // The fill is pure background colour (invisible in this colourless render); what the
+        // plain text pins is the bar frame and the reading centred inside it, at the 9-cell
+        // width the test host's fallback window yields.
+        Assert.Contains("[  24/30  ]", text);
+        Assert.Contains("[  2/10   ]", text);
     }
 
     [Fact]

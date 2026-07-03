@@ -826,13 +826,12 @@ public sealed class LiveStatusDisplay : IDisposable
     private static string TrimName(string name, int max = 14) =>
         name.Length <= max ? name : name[..(max - 1)] + "…";
 
-    /// <summary>A bracketed segment meter as Spectre markup with the numbers overlaid mid-bar,
-    /// e.g. "[===24/30==--]": grey brackets frame the coloured '='/'-' fill (plain ASCII, the
-    /// only glyphs every monospace font renders as discrete segments). The reading replaces the
-    /// cells it covers, but keeps the meter legible through itself: over filled cells the digits
-    /// render on the fill colour as a background, over empty cells they render bold white on
-    /// none, so the fill boundary stays visible even when it lands mid-label ("[[" renders a
-    /// literal bracket).</summary>
+    /// <summary>A bracketed meter as Spectre markup: the fill is a background-colour wash over
+    /// space cells (terminal-drawn rectangles, so it renders uniformly in any font, unlike
+    /// glyphs), the empty portion is bare, and grey brackets frame the extent. The reading
+    /// overlays the middle: digits over filled cells render on the fill colour, digits over
+    /// empty cells render bold white on none, so the fill boundary stays visible even when it
+    /// lands mid-label ("[[" renders a literal bracket).</summary>
     private static string BarMarkup(int value, int max, int width, string colour)
     {
         var label = $"{Math.Max(0, value)}/{Math.Max(0, max)}";
@@ -843,17 +842,18 @@ public sealed class LiveStatusDisplay : IDisposable
         // Black text carries best on the bright fills; blue is dark enough to need white.
         var textOnFill = colour == "blue" ? "white" : "black";
         var markup = new StringBuilder("[grey][[[/]");
-        AppendSegments(0, start);
+        AppendCells(0, start);
         AppendLabel();
-        AppendSegments(start + label.Length, width);
+        AppendCells(start + label.Length, width);
         markup.Append("[grey]]][/]");
         return markup.ToString();
 
-        void AppendSegments(int from, int to)
+        void AppendCells(int from, int to)
         {
             var fillTo = Math.Clamp(filled, from, to);
-            if (fillTo > from) markup.Append($"[{colour}]{new string('=', fillTo - from)}[/]");
-            if (to > fillTo) markup.Append($"[grey]{new string('-', to - fillTo)}[/]");
+            // Spaces stay inside markup spans: Spectre trims whitespace that sits outside one.
+            if (fillTo > from) markup.Append($"[on {colour}]{new string(' ', fillTo - from)}[/]");
+            if (to > fillTo) markup.Append($"[grey]{new string(' ', to - fillTo)}[/]");
         }
 
         void AppendLabel()
