@@ -5,7 +5,7 @@
 #   ./scripts/coach-pull-models.ps1
 #   ./scripts/coach-pull-models.ps1 -FastModel gemma3:4b -ReasoningModel qwen3:14b
 param(
-    [string]$FastModel = "qwen3:4b",
+    [string]$FastModel = "qwen3:4b-instruct",
     [string]$ReasoningModel = "llama3.1:8b",
     [string]$EmbedModel = "nomic-embed-text",
     [switch]$SkipDb

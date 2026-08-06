@@ -6,7 +6,7 @@
 #   # bring up the dependencies once
 #   docker compose -f docker/callscribe.compose.yml up -d coach-db ollama
 #   # pull the coach models into the ollama volume (first run only)
-#   docker compose -f docker/callscribe.compose.yml exec ollama ollama pull qwen3:4b
+#   docker compose -f docker/callscribe.compose.yml exec ollama ollama pull qwen3:4b-instruct
 #   # transcribe the latest recording in ./data/recordings
 #   docker compose -f docker/callscribe.compose.yml run --rm app transcribe
 #

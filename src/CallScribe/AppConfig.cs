@@ -63,9 +63,12 @@ public sealed class AppConfig
     [JsonPropertyName("ollamaUrl")]
     public string OllamaUrl { get; set; } = "http://localhost:11434";
 
-    /// <summary>Small low-latency model for per-utterance triage and quick advice.</summary>
+    /// <summary>Small low-latency model for per-utterance triage and quick advice. Must be a
+    /// non-thinking model: on Ollama 0.32+ the thinking qwen3 tags ignore think=false, so the
+    /// advisor gets transcript echoes or raw reasoning instead of the decision JSON and the
+    /// coach falls silent.</summary>
     [JsonPropertyName("fastModel")]
-    public string FastModel { get; set; } = "qwen3:4b";
+    public string FastModel { get; set; } = "qwen3:4b-instruct";
 
     /// <summary>Larger model for background synthesis and end-of-meeting consolidation.</summary>
     [JsonPropertyName("reasoningModel")]

@@ -53,7 +53,7 @@ cd docker
 docker compose -f callscribe.compose.yml up -d coach-db ollama
 
 # first run only: pull the coach models into the ollama volume
-docker compose -f callscribe.compose.yml exec ollama ollama pull qwen3:4b
+docker compose -f callscribe.compose.yml exec ollama ollama pull qwen3:4b-instruct
 docker compose -f callscribe.compose.yml exec ollama ollama pull nomic-embed-text
 
 # drop a recording pair into ./data/call-scribe/recordings, then:
