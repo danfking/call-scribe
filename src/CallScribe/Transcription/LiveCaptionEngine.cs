@@ -101,29 +101,20 @@ public sealed class LiveCaptionEngine : IDisposable
     /// <summary>Set dashboard detail (the live model name shown in the footer).</summary>
     public void ConfigureDisplay(string model) => _display.Configure(model);
 
-    /// <summary>Turn on the coach advice column to the right of the transcript.</summary>
-    public void EnableAdvicePanel() => _display.EnableAdvicePanel();
+    /// <summary>Register a live module (boss fight, coach, ...) with the dashboard's panel slot.</summary>
+    public void RegisterModule(ILiveModule module) => _display.RegisterModule(module);
 
-    /// <summary>Forward a coach advice item to the dashboard. Presentation hints are
-    /// passed as primitives so this class stays independent of the coach namespace.</summary>
-    public void PrintAdvice(DateTime at, string colour, string glyph, string text) =>
-        _display.PrintAdvice(at, colour, glyph, text);
+    /// <summary>Make the module with this id the active panel (null or unknown clears the slot).</summary>
+    public void SetActiveModule(string? id) => _display.SetActiveModule(id);
 
-    /// <summary>Forward the coach's current activity (thinking / listening / nothing-to-add) to
-    /// the dashboard status line. Primitives keep this class independent of the coach namespace.</summary>
-    public void SetCoachActivity(string text, string colour) =>
-        _display.SetCoachActivity(text, colour);
+    /// <summary>The registered modules (for the switcher and completion).</summary>
+    public IReadOnlyList<ILiveModule> Modules => _display.Modules;
 
-    /// <summary>Turn on the RPG panel below the transcript (replaces the coach panel's slot).</summary>
-    public void EnableRpgPanel() => _display.EnableRpgPanel();
+    /// <summary>Drain every module's in-flight work at end of meeting.</summary>
+    public Task CompleteModulesAsync() => _display.CompleteModulesAsync();
 
-    /// <summary>Forward the RPG module's party/boss snapshot to the dashboard. The state record
-    /// is display-owned, keeping this class independent of the Rpg namespace.</summary>
-    public void UpdateRpg(RpgPanelState state) => _display.UpdateRpg(state);
-
-    /// <summary>Forward a narrated RPG event line to the dashboard's event log.</summary>
-    public void PrintRpgEvent(DateTime at, string colour, string text) =>
-        _display.PrintRpgEvent(at, colour, text);
+    /// <summary>Dispose every registered module.</summary>
+    public void DisposeModules() => _display.DisposeModules();
 
     /// <summary>Callback for the dashboard's /assign-name command (rename + persist a speaker).</summary>
     public Func<string, string, CancellationToken, Task<bool>>? OnAssignName

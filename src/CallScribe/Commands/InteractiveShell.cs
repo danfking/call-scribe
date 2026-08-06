@@ -17,6 +17,7 @@ public static class InteractiveShell
     private const string Devices = "Devices";
     private const string Config = "Config";
     private const string Coach = "Coach";
+    private const string Rpg = "RPG";
     private const string Palette = "Type a command...";
     private const string Quit = "Quit";
 
@@ -46,7 +47,7 @@ public static class InteractiveShell
                 var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
                     .Title("What would you like to do?")
                     .PageSize(10)
-                    .AddChoices(Start, Transcribe, Background, Devices, Config, Coach, Palette, Quit));
+                    .AddChoices(Start, Transcribe, Background, Devices, Config, Coach, Rpg, Palette, Quit));
 
                 if (choice == Quit) return 0;
 
@@ -83,6 +84,7 @@ public static class InteractiveShell
         Devices => ["devices"],
         Config => ConfigMenu(),
         Coach => CoachMenu(),
+        Rpg => RpgMenu(),
         Palette => Tokenize(Ask("Command (e.g. config set liveModel base.en)", "")),
         _ => [],
     };
@@ -150,6 +152,28 @@ public static class InteractiveShell
             case "Replay a script":
                 var script = Ask("Path to a JSONL meeting script", "");
                 return script.Length == 0 ? [] : ["coach", "replay", script];
+            default:
+                return [];
+        }
+    }
+
+    private static string[] RpgMenu()
+    {
+        var pick = AnsiConsole.Prompt(new SelectionPrompt<string>()
+            .Title("RPG")
+            .AddChoices(
+                "Start a call as a boss fight",
+                "Replay a script",
+                "Back"));
+        switch (pick)
+        {
+            case "Start a call as a boss fight":
+                // Same handler as Start; --rpg swaps the coach panel for the boss-fight panel.
+                return WithLabel("start", "--rpg");
+            case "Replay a script":
+                // --fast is left to the typed palette: the time-window rules want real pacing.
+                var script = Ask("Path to a JSONL meeting script", "");
+                return script.Length == 0 ? [] : ["rpg", "replay", script];
             default:
                 return [];
         }

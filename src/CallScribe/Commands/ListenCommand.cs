@@ -93,68 +93,51 @@ public static class ListenCommand
         using var captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
 
         // Created inside the try so a cancellation (Ctrl-C) during capture still disposes
-        // their native (sherpa) and DB-pool handles via the finally.
-        CoachEngine? coach = null;
+        // their native (sherpa) and DB-pool handles via the finally. The live modules (coach, RPG)
+        // are owned by the display's module host; the command disposes them via captions.
         IMemoryStore? coachMemory = null;
         SpeakerIdentity? speakerId = null;
-        RpgEngine? rpg = null;
         try
         {
-            // RPG mode and the coach panel contend for the same slot below the transcript; RPG
-            // wins (an explicit --rpg is a clear ask for this session's novelty, and erroring on
-            // a coachEnabled config would force a config edit). The coach engine still runs
-            // stubbed underneath for transcript persistence.
+            // The dashboard slot hosts one live module at a time. Build the ones this session wants,
+            // register them, and pick which is on screen. RPG and the coach panel both want the
+            // slot, so when both are asked for RPG is the visible one (an explicit --rpg is a clear
+            // ask for this session's novelty); the coach still runs underneath for the transcript.
             var wantRpg = rpgFlag || config.RpgEnabled;
-            // The coach watches the same caption stream the dashboard renders. Opt-in via --coach
-            // or config; the stub advisor needs no models, so this works offline. The default
-            // (live-transcript) path also needs the coach's transcript store (that is where the live
-            // transcript is persisted for the stop-time export), but not the advice panel, so it runs
-            // the coach with a stub advisor (no Ollama, no panel) purely to persist segments.
             var wantCoachPanel = (coachFlag || config.CoachEnabled) && !wantRpg;
             if (wantRpg && (coachFlag || config.CoachEnabled))
             {
-                AnsiConsole.MarkupLine("[grey]RPG mode replaces the coach panel this session.[/]");
+                AnsiConsole.MarkupLine("[grey]RPG mode is the active panel this session; the coach still runs underneath.[/]");
             }
-            // The live transcript is the default artifact; only --full (batch pass) opts out of saving
-            // it, and only then do we not need the transcript store.
+            // The live transcript is the default artifact; only --full (batch pass) opts out of
+            // saving it. The coach engine persists that transcript (and its memory store holds it
+            // for the stop-time export), so the coach is built whenever the panel is shown or the
+            // live transcript is wanted, with a stub advisor when only persistence is needed.
             var wantLiveTranscript = !full;
+            string? activeModuleId = null;
+
             if (wantCoachPanel || wantLiveTranscript)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
                 var profileStore = CoachFactory.CreateProfileStore(config);
                 var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory, profileStore);
-                coach = new CoachEngine(advisor, coachMemory, stem);
-                if (wantCoachPanel)
-                {
-                    captions.EnableAdvicePanel();
-                    coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
-                    // One place maps a coach activity to its panel presentation; seed the resting
-                    // state so the panel shows "Listening" before the first utterance.
-                    static (string Text, string Colour) Present(CoachActivity activity) => activity switch
-                    {
-                        CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
-                        CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
-                        _ => ("○ Listening", "grey"),
-                    };
-                    coach.ActivityChanged += activity =>
-                    {
-                        var (text, colour) = Present(activity);
-                        captions.SetCoachActivity(text, colour);
-                    };
-                    var (restText, restColour) = Present(CoachActivity.Listening);
-                    captions.SetCoachActivity(restText, restColour);
-                }
-                captions.CaptionEmitted += coach.Observe;
+                var coachModule = new CoachModule(new CoachEngine(advisor, coachMemory, stem));
+                captions.RegisterModule(coachModule);
+                // Fed every caption: the coach persists the transcript whether or not its panel is
+                // shown (its advice work is what pauses when hidden, not its persistence).
+                captions.CaptionEmitted += coachModule.Observe;
+                if (wantCoachPanel) activeModuleId = coachModule.Id;
             }
 
             if (wantRpg)
             {
-                rpg = new RpgEngine(new RpgRules(), selfName: config.SelfSpeakerName);
-                captions.EnableRpgPanel();
-                rpg.StateChanged += state => captions.UpdateRpg(state);
-                rpg.EventEmitted += (at, colour, text) => captions.PrintRpgEvent(at, colour, text);
-                captions.CaptionEmitted += rpg.Observe;
+                var rpgModule = new RpgModule(config.SelfSpeakerName);
+                captions.RegisterModule(rpgModule);
+                captions.CaptionEmitted += rpgModule.Observe;
+                activeModuleId = rpgModule.Id;
             }
+
+            captions.SetActiveModule(activeModuleId);
 
             // Identify far-side speakers so live captions (and the coach) get names, not just
             // "Others". Degrades to null when off or the models/native runtime are unavailable.
@@ -204,15 +187,9 @@ public static class ListenCommand
 
             var duration = await engine.StopAsync().ConfigureAwait(false);
             await captions.CompleteAsync().ConfigureAwait(false);
-            if (coach != null)
-            {
-                // Captions are fully emitted now; drain any advice still in flight.
-                await coach.CompleteAsync().ConfigureAwait(false);
-            }
-            if (rpg != null)
-            {
-                await rpg.CompleteAsync().ConfigureAwait(false);
-            }
+            // Captions are fully emitted now; drain any module work still in flight (advice in the
+            // coach's queue, the RPG loop) before reading the persisted transcript below.
+            await captions.CompleteModulesAsync().ConfigureAwait(false);
             // Fold the meeting's fragmented live speaker labels now the whole recording is in, and
             // rewrite the persisted live transcript so the consolidated names flow through into the
             // memory consolidation below (and any later read of the live transcript). Best-effort and
@@ -299,8 +276,8 @@ public static class ListenCommand
         }
         finally
         {
-            rpg?.Dispose();
-            coach?.Dispose();
+            // Dispose the live modules (their engines) before the memory store they wrote to.
+            captions.DisposeModules();
             if (coachMemory != null) await coachMemory.DisposeAsync().ConfigureAwait(false);
             if (speakerId != null) await speakerId.DisposeAsync().ConfigureAwait(false);
         }

@@ -41,17 +41,17 @@ public static class RpgCommand
 
         var config = AppConfig.Load();
         using var display = new LiveStatusDisplay();
-        display.EnableRpgPanel();
         display.Configure("rpg replay");
         display.Register(LiveCaptionEngine.OthersLabel, "yellow");
         display.Register(LiveCaptionEngine.MeLabel, "cyan");
 
-        using var rpg = new RpgEngine(new RpgRules(), selfName: config.SelfSpeakerName);
-        rpg.StateChanged += state => display.UpdateRpg(state);
-        rpg.EventEmitted += (at, colour, text) => display.PrintRpgEvent(at, colour, text);
+        var rpg = new RpgModule(config.SelfSpeakerName);
+        display.RegisterModule(rpg);
+        display.SetActiveModule(rpg.Id); // active so it observes captions and owns the slot
 
         await MockMeetingDriver.ReplayAsync(script, display, rpg.Observe, realtime: !fast, ct).ConfigureAwait(false);
-        await rpg.CompleteAsync().ConfigureAwait(false);
+        await display.CompleteModulesAsync().ConfigureAwait(false);
+        display.DisposeModules();
         display.Shutdown();
         return 0;
     }
