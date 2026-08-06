@@ -305,16 +305,17 @@ public static class CoachCommand
         var meetingId = $"{Path.GetFileNameWithoutExtension(script)}-replay";
 
         using var display = new LiveStatusDisplay();
-        display.EnableAdvicePanel();
         display.Configure(usingModel ? config.FastModel : "stub advisor");
         display.Register(LiveCaptionEngine.OthersLabel, "yellow");
         display.Register(LiveCaptionEngine.MeLabel, "cyan");
 
-        using var coach = new CoachEngine(advisor, memory, meetingId);
-        coach.AdviceEmitted += a => display.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+        var coach = new CoachModule(new CoachEngine(advisor, memory, meetingId));
+        display.RegisterModule(coach);
+        display.SetActiveModule(coach.Id); // active so advice flows and the panel shows
 
         await MockMeetingDriver.ReplayAsync(script, display, coach.Observe, realtime: !fast, ct).ConfigureAwait(false);
-        await coach.CompleteAsync().ConfigureAwait(false);
+        await display.CompleteModulesAsync().ConfigureAwait(false);
+        display.DisposeModules();
         display.Shutdown();
 
         if (memory != null)

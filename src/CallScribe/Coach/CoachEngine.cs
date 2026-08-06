@@ -49,6 +49,11 @@ public sealed class CoachEngine : IDisposable
     private readonly List<string> _recentAdvice = [];
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
+    // When false, the loop still persists each caption but skips the advisor call (no model work).
+    // The coach panel module flips this on the meeting's active-panel switch, so a hidden coach
+    // costs nothing while the transcript it backs stays complete. Volatile: set from the UI thread,
+    // read on the loop task.
+    private volatile bool _adviceActive = true;
 
     /// <summary>Raised when the advisor decides advice is warranted. Fires on the loop
     /// task, never on the caption thread.</summary>
@@ -71,6 +76,10 @@ public sealed class CoachEngine : IDisposable
     /// returns immediately — the advisor work runs on the loop task.</summary>
     public void Observe(CaptionEvent caption) => _inbox.Writer.TryWrite(caption);
 
+    /// <summary>Show or hide the advice work. When inactive the loop still persists captions (so the
+    /// live transcript stays complete) but makes no advisor/model call. Safe to call from any thread.</summary>
+    public void SetAdviceActive(bool active) => _adviceActive = active;
+
     private async Task ProcessAsync()
     {
         // One caption at a time, in order. At speaking pace the live engine emits a
@@ -78,7 +87,6 @@ public sealed class CoachEngine : IDisposable
         // stays shallow; if a future model proves too slow, add debouncing here.
         await foreach (var caption in _inbox.Reader.ReadAllAsync().ConfigureAwait(false))
         {
-            ActivityChanged?.Invoke(CoachActivity.Thinking);
             _context.Add(caption);
             if (_context.Count > ContextWindow)
             {
@@ -86,7 +94,8 @@ public sealed class CoachEngine : IDisposable
             }
 
             // Persist to the realtime hypertable (best effort: a memory hiccup must not
-            // stop captioning or advice).
+            // stop captioning or advice). Persistence is unconditional: it backs the live
+            // transcript, so it runs even while the coach panel is hidden.
             if (_memory != null)
             {
                 try
@@ -98,6 +107,11 @@ public sealed class CoachEngine : IDisposable
                 catch { /* swallow: persistence is non-critical to the live loop */ }
             }
 
+            // Hidden: persist only, no model work. The context window above is still maintained so
+            // advice has history to draw on the moment the panel is shown again.
+            if (!_adviceActive) continue;
+
+            ActivityChanged?.Invoke(CoachActivity.Thinking);
             try
             {
                 var advice = await _advisor.ConsiderAsync(_context, caption, _recentAdvice, _cts.Token).ConfigureAwait(false);
