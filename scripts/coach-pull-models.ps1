@@ -3,7 +3,7 @@
 # override with parameters if you've changed them in `call-scribe config`.
 #
 #   ./scripts/coach-pull-models.ps1
-#   ./scripts/coach-pull-models.ps1 -FastModel gemma3:4b -ReasoningModel qwen3:14b
+#   ./scripts/coach-pull-models.ps1 -FastModel gemma3:4b -ReasoningModel gemma3:12b
 param(
     [string]$FastModel = "qwen3:4b-instruct",
     [string]$ReasoningModel = "llama3.1:8b",
