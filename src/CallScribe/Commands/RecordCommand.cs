@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Diagnostics;
 using CallScribe.Audio;
 using CallScribe.Transcription;
+using NAudio.Wave;
 using Spectre.Console;
 using Whisper.net.Ggml;
 
@@ -26,8 +27,18 @@ public static class RecordCommand
         start.SetAction((parseResult, ct) => StartDetachedAsync(parseResult.GetValue(labelOption), ct));
         record.Subcommands.Add(start);
 
-        var stop = new Command("stop", "Stop the detached recording, finalise the files, and transcribe");
-        stop.SetAction((_, ct) => StopDetachedAsync(ct));
+        var stopFullOption = new Option<bool>("--full")
+        {
+            Description = "Run the slow, high-accuracy batch transcription (whisper-large + VAD) instead of "
+                          + "saving the live transcript. The batch pass is also the only path that honours "
+                          + "keepAudio=false; the default keeps the WAVs for replay. `transcribe latest` "
+                          + "re-runs it later if you change your mind.",
+        };
+        var stop = new Command("stop",
+            "Stop the detached recording and save the live transcript immediately (use --full for the slow "
+            + "high-accuracy batch pass)");
+        stop.Options.Add(stopFullOption);
+        stop.SetAction((parseResult, ct) => StopDetachedAsync(parseResult.GetValue(stopFullOption), ct));
         record.Subcommands.Add(stop);
 
         var status = new Command("status", "Show whether a recording is in progress");
@@ -159,7 +170,7 @@ public static class RecordCommand
         return 0;
     }
 
-    private static async Task<int> StopDetachedAsync(CancellationToken ct)
+    private static async Task<int> StopDetachedAsync(bool full, CancellationToken ct)
     {
         if (!File.Exists(AppPaths.PidFile))
         {
@@ -201,12 +212,42 @@ public static class RecordCommand
         var sizeMb = (new FileInfo(others).Length + new FileInfo(me).Length) / 1024.0 / 1024.0;
         AnsiConsole.MarkupLine($"[green]Recording stopped[/] -> {others.EscapeMarkup()} (+ .me.wav, {sizeMb:F1} MB total)");
 
-        // Every recording path produces a transcript; the detached worker only captured the WAVs, so
-        // run the batch transcription now that the files are finalised.
+        // Default: the worker's live captions become the transcript immediately, same as the
+        // start command's live-first stop. The batch pass only runs on --full, or when the live
+        // log is empty (an old worker, a sink failure, or pure silence), so a stop always yields
+        // an artifact. This path never deletes the WAVs; they stay replayable.
+        if (!full)
+        {
+            var lines = LiveCaptionLog.Read(LiveCaptionLog.PathFor(stem));
+            if (lines.Count > 0)
+            {
+                var path = TranscriptMerger.MergeLive(stem, lines, AppPaths.TranscriptsDir, WavDuration(others));
+                AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path.EscapeMarkup()}");
+                return 0;
+            }
+            AnsiConsole.MarkupLine(
+                "[yellow]No live captions were logged for this recording; running the batch transcription instead.[/]");
+        }
+
         var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
         await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, AppConfig.Load(), ct)
             .ConfigureAwait(false);
         return 0;
+    }
+
+    /// <summary>The recorded length for the transcript frontmatter, from the WAV header. Null (a
+    /// truncated header after a crash) lets MergeLive fall back to the caption span.</summary>
+    private static TimeSpan? WavDuration(string wavPath)
+    {
+        try
+        {
+            using var reader = new WaveFileReader(wavPath);
+            return reader.TotalTime;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static int Status()

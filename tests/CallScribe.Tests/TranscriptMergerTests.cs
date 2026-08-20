@@ -113,6 +113,37 @@ public class TranscriptMergerTests
     }
 
     [Fact]
+    public void MergeLive_FromALiveCaptionLog_ProducesTheSameArtifact()
+    {
+        // The live-first stop path (start and record stop) reads {stem}.live.jsonl back and
+        // feeds it straight to MergeLive; this pins that composed contract.
+        var t0 = new DateTime(2026, 6, 11, 15, 0, 0, DateTimeKind.Local);
+        var logPath = Path.Combine(TempDir, "roundtrip.live.jsonl");
+        using (var log = LiveCaptionLog.TryCreate(logPath))
+        {
+            log!.Append(new CaptionEvent(t0, "Me", "Morning everyone."));
+            log.Append(new CaptionEvent(t0.AddSeconds(5), "Others", "Quick update from me.", Speaker: "Kiel"));
+            log.Append(new CaptionEvent(t0.AddSeconds(9), "Others", "Shipped the fix yesterday.", Speaker: "Kiel"));
+            log.Append(new CaptionEvent(t0.AddSeconds(15), "Me", "Thanks Kiel."));
+        }
+
+        var fromLog = TranscriptMerger.MergeLive(
+            "2026-06-11-1500-standup", LiveCaptionLog.Read(logPath), Path.Combine(TempDir, "from-log"));
+        var fromTuples = TranscriptMerger.MergeLive(
+            "2026-06-11-1500-standup",
+            [
+                (t0, "Me", "Morning everyone."),
+                (t0.AddSeconds(5), "Kiel", "Quick update from me."),
+                (t0.AddSeconds(9), "Kiel", "Shipped the fix yesterday."),
+                (t0.AddSeconds(15), "Me", "Thanks Kiel."),
+            ],
+            Path.Combine(TempDir, "from-tuples"));
+
+        Assert.Equal(File.ReadAllText(fromTuples), File.ReadAllText(fromLog));
+        Assert.Contains("source: live", File.ReadAllText(fromLog));
+    }
+
+    [Fact]
     public void Merge_SkipsEmptySegments()
     {
         var others = new TrackTranscript("Others", 10, [new TranscriptSegment(1.0, 2.0, "  ")]);
