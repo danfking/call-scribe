@@ -1,7 +1,9 @@
 using System.CommandLine;
 using System.Diagnostics;
 using CallScribe.Audio;
+using CallScribe.Transcription;
 using Spectre.Console;
+using Whisper.net.Ggml;
 
 namespace CallScribe.Commands;
 
@@ -21,7 +23,7 @@ public static class RecordCommand
 
         var start = new Command("start", "Start a detached background recording");
         start.Options.Add(labelOption);
-        start.SetAction(parseResult => StartDetached(parseResult.GetValue(labelOption)));
+        start.SetAction((parseResult, ct) => StartDetachedAsync(parseResult.GetValue(labelOption), ct));
         record.Subcommands.Add(start);
 
         var stop = new Command("stop", "Stop the detached recording, finalise the files, and transcribe");
@@ -50,7 +52,7 @@ public static class RecordCommand
         return $"{stamp}-{safe}";
     }
 
-    private static int StartDetached(string? label)
+    private static async Task<int> StartDetachedAsync(string? label, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
         if (IsRecordingInProgress())
@@ -58,6 +60,16 @@ public static class RecordCommand
             AnsiConsole.MarkupLine("[red]A recording is already in progress. Stop it first.[/]");
             return 1;
         }
+
+        // Ensure the live caption model here, where there is a console to show a first-run
+        // download's progress; the windowless worker would otherwise block on it silently.
+        try
+        {
+            await ModelManager.EnsureWhisperModelAsync(
+                    ModelManager.ParseModel(AppConfig.Load().LiveModel), QuantizationType.NoQuantization, ct)
+                .ConfigureAwait(false);
+        }
+        catch { /* the worker degrades to capture-only recording when the model is unavailable */ }
 
         Directory.CreateDirectory(AppPaths.StateDir);
         File.Delete(AppPaths.StopFlag);
@@ -91,7 +103,38 @@ public static class RecordCommand
     private static async Task<int> RunDetachedWorkerAsync(string stem, CancellationToken ct)
     {
         if (LiveCaptureGuard.Unavailable()) return 1;
-        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, AppConfig.Load());
+        var config = AppConfig.Load();
+        using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
+
+        // Live captions in the worker feed {stem}.live.jsonl (tailable during the call) and the
+        // live-first transcript at stop. There is no console here, so the caption engine's display
+        // degrades to plain writes against a null stdout; the echo filter and deferred Me decisions
+        // still run. Any failure (model missing, jsonl unwritable) degrades to capture-only, which
+        // is exactly the old behaviour. Note the taps are unbounded: if the live model falls behind
+        // realtime, memory grows for the call's duration (same exposure as the foreground path).
+        LiveCaptionEngine? captions = null;
+        LiveCaptionLog? liveLog = null;
+        try
+        {
+            var liveModelPath = await ModelManager.EnsureWhisperModelAsync(
+                    ModelManager.ParseModel(config.LiveModel), QuantizationType.NoQuantization, ct)
+                .ConfigureAwait(false);
+            var log = LiveCaptionLog.TryCreate(LiveCaptionLog.PathFor(stem));
+            if (log != null)
+            {
+                captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
+                captions.CaptionEmitted += log.Append;
+                captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
+                captions.Attach(LiveCaptionEngine.MeLabel, "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
+                liveLog = log;
+            }
+        }
+        catch
+        {
+            captions?.Dispose();
+            captions = null;
+        }
+
         engine.Start();
         try
         {
@@ -103,6 +146,14 @@ public static class RecordCommand
         finally
         {
             await engine.StopAsync().ConfigureAwait(false);
+            if (captions != null)
+            {
+                // Drain the final whisper flush and any deferred Me decisions so the jsonl
+                // carries the whole call; best-effort, the WAVs are already safe.
+                try { await captions.CompleteAsync().ConfigureAwait(false); } catch { }
+                captions.Dispose();
+            }
+            liveLog?.Dispose();
             File.Delete(AppPaths.StopFlag);
         }
         return 0;
@@ -123,7 +174,9 @@ public static class RecordCommand
         {
             using var worker = Process.GetProcessById(pid);
             File.WriteAllText(AppPaths.StopFlag, string.Empty);
-            if (!worker.WaitForExit(TimeSpan.FromSeconds(15)))
+            // The worker finishes its final whisper flush plus deferred Me decisions (up to ~6 s)
+            // before exiting, so give it longer than a capture-only stop would need.
+            if (!worker.WaitForExit(TimeSpan.FromSeconds(30)))
             {
                 AnsiConsole.MarkupLine("[red]Worker did not stop in time; killing it. The WAVs may need repair.[/]");
                 worker.Kill();
@@ -166,6 +219,9 @@ public static class RecordCommand
 
         var stem = File.Exists(AppPaths.StemFile) ? File.ReadAllText(AppPaths.StemFile) : "(unknown)";
         AnsiConsole.MarkupLine($"[green]Recording in progress[/]: {stem.EscapeMarkup()}");
+        AnsiConsole.MarkupLine($"[grey]Live captions:[/] {LiveCaptionLog.PathFor(stem).EscapeMarkup()}");
+        AnsiConsole.MarkupLine($"[grey]Recordings:[/]   {AppPaths.RecordingsDir.EscapeMarkup()}");
+        AnsiConsole.MarkupLine($"[grey]Transcripts:[/]  {AppPaths.TranscriptsDir.EscapeMarkup()}");
         return 0;
     }
 

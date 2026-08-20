@@ -84,6 +84,11 @@ public static class ListenCommand
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
         using var captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
 
+        // Every emitted caption also lands in {stem}.live.jsonl so an external process can
+        // tail the call as it happens. Degrades to null; the session just runs without it.
+        using var liveLog = LiveCaptionLog.TryCreate(LiveCaptionLog.PathFor(stem));
+        if (liveLog != null) captions.CaptionEmitted += liveLog.Append;
+
         // Created inside the try so a cancellation (Ctrl-C) during capture still disposes
         // their native (sherpa) and DB-pool handles via the finally.
         CoachEngine? coach = null;
