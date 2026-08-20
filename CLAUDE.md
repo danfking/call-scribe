@@ -43,7 +43,10 @@ Audio, Transcription do NOT depend on Coach.
   degrade with a clear message off-Windows.
 - **Transcription**: live captions (`LiveCaptionEngine` + `LiveStatusDisplay` dashboard, small model,
   fixed audio-window chunking) vs the stop-time batch pass (`TranscriptionService`, large model + VAD,
-  `TranscriptMerger` writes the `.md`).
+  `TranscriptMerger` writes the `.md`). Every emitted caption is also appended to
+  `{stem}.live.jsonl` next to the WAVs (`LiveCaptionLog`, per-line flush, tailable by an external
+  process mid-call); that file is the source of the default live-first transcript at stop, so it
+  needs no Postgres. The batch pass runs on `--full` or when the caption log is empty.
 - **Coach** (`CoachEngine`, `LlmAdvisor`/`StubAdvisor`, `Memory/`, `Speaker/`): watches the same caption
   stream, persists the live transcript to Postgres, and advises via Ollama. `Speaker/` resolves far-side
   voices (live single-pass clustering vs authoritative offline diarization).

@@ -74,6 +74,14 @@ public sealed class LiveCaptionLog : IDisposable
         return lines;
     }
 
+    /// <summary>Apply a speaker remap (from the stop-time consolidation of fragmented live
+    /// labels) to a read-back caption list. The jsonl file stays raw; the renamed lines exist
+    /// only in memory on their way to the transcript.</summary>
+    public static IReadOnlyList<(DateTime At, string Speaker, string Text)> Remap(
+        IReadOnlyList<(DateTime At, string Speaker, string Text)> lines,
+        IReadOnlyDictionary<string, string> remap) =>
+        [.. lines.Select(l => remap.TryGetValue(l.Speaker, out var name) ? (l.At, name, l.Text) : l)];
+
     public void Dispose()
     {
         lock (_gate) _writer.Dispose();

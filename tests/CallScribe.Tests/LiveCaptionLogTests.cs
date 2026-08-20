@@ -124,6 +124,31 @@ public class LiveCaptionLogTests
     }
 
     [Fact]
+    public void Remap_RenamesConsolidatedSpeakersAndLeavesTheRestAlone()
+    {
+        // The stop-time speaker consolidation folds fragmented live labels ("Speaker 2" turned
+        // out to be Priya); the jsonl stays raw, so the remap is applied in memory on the way
+        // to MergeLive.
+        var at = new DateTime(2026, 8, 20, 10, 0, 0, DateTimeKind.Local);
+        IReadOnlyList<(DateTime At, string Speaker, string Text)> lines =
+        [
+            (at, "Me", "Hi."),
+            (at.AddSeconds(3), "Speaker 1", "Hello."),
+            (at.AddSeconds(6), "Speaker 2", "Also hello."),
+        ];
+
+        var remapped = LiveCaptionLog.Remap(lines, new Dictionary<string, string>
+        {
+            ["Speaker 1"] = "Priya",
+            ["Speaker 2"] = "Priya",
+        });
+
+        Assert.Equal((at, "Me", "Hi."), remapped[0]);
+        Assert.Equal((at.AddSeconds(3), "Priya", "Hello."), remapped[1]);
+        Assert.Equal((at.AddSeconds(6), "Priya", "Also hello."), remapped[2]);
+    }
+
+    [Fact]
     public void PathFor_PutsTheLogNextToTheRecordings()
     {
         Assert.EndsWith("2026-08-20-0930-standup.live.jsonl", LiveCaptionLog.PathFor("2026-08-20-0930-standup"));

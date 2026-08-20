@@ -31,7 +31,7 @@ public static class ListenCommand
         {
             Description = "Run the slow, high-accuracy batch transcription after stopping (whisper-large + VAD) "
                           + "plus offline speaker diarization and interactive naming. The default saves the "
-                          + "faster live transcript instead (slightly lower accuracy; needs the coach memory DB).",
+                          + "faster live transcript instead (slightly lower accuracy).",
         };
         var coachOption = new Option<bool>("--coach")
         {
@@ -97,40 +97,32 @@ public static class ListenCommand
         try
         {
             // The coach watches the same caption stream the dashboard renders. Opt-in via --coach
-            // or config; the stub advisor needs no models, so this works offline. The default
-            // (live-transcript) path also needs the coach's transcript store (that is where the live
-            // transcript is persisted for the stop-time export), but not the advice panel, so it runs
-            // the coach with a stub advisor (no Ollama, no panel) purely to persist segments.
+            // or config. The live transcript itself no longer needs the coach: the jsonl caption
+            // log is its source, so a plain start runs with no coach, no Postgres, and no Ollama.
             var wantCoachPanel = coachFlag || config.CoachEnabled;
-            // The live transcript is the default artifact; only --full (batch pass) opts out of saving
-            // it, and only then do we not need the transcript store.
-            var wantLiveTranscript = !full;
-            if (wantCoachPanel || wantLiveTranscript)
+            if (wantCoachPanel)
             {
                 coachMemory = await CoachFactory.TryCreateMemoryAsync(config, ct).ConfigureAwait(false);
                 var profileStore = CoachFactory.CreateProfileStore(config);
-                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: !wantCoachPanel, coachMemory, profileStore);
+                var (advisor, _) = CoachFactory.CreateAdvisor(config, forceStub: false, coachMemory, profileStore);
                 coach = new CoachEngine(advisor, coachMemory, stem);
-                if (wantCoachPanel)
+                captions.EnableAdvicePanel();
+                coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
+                // One place maps a coach activity to its panel presentation; seed the resting
+                // state so the panel shows "Listening" before the first utterance.
+                static (string Text, string Colour) Present(CoachActivity activity) => activity switch
                 {
-                    captions.EnableAdvicePanel();
-                    coach.AdviceEmitted += a => captions.PrintAdvice(a.At, a.Colour, a.Glyph, a.Text);
-                    // One place maps a coach activity to its panel presentation; seed the resting
-                    // state so the panel shows "Listening" before the first utterance.
-                    static (string Text, string Colour) Present(CoachActivity activity) => activity switch
-                    {
-                        CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
-                        CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
-                        _ => ("○ Listening", "grey"),
-                    };
-                    coach.ActivityChanged += activity =>
-                    {
-                        var (text, colour) = Present(activity);
-                        captions.SetCoachActivity(text, colour);
-                    };
-                    var (restText, restColour) = Present(CoachActivity.Listening);
-                    captions.SetCoachActivity(restText, restColour);
-                }
+                    CoachActivity.Thinking => ("◍ Thinking…", "magenta"),
+                    CoachActivity.Quiet => ("○ Considered, nothing to add", "grey"),
+                    _ => ("○ Listening", "grey"),
+                };
+                coach.ActivityChanged += activity =>
+                {
+                    var (text, colour) = Present(activity);
+                    captions.SetCoachActivity(text, colour);
+                };
+                var (restText, restColour) = Present(CoachActivity.Listening);
+                captions.SetCoachActivity(restText, restColour);
                 captions.CaptionEmitted += coach.Observe;
             }
 
@@ -187,23 +179,26 @@ public static class ListenCommand
                 // Captions are fully emitted now; drain any advice still in flight.
                 await coach.CompleteAsync().ConfigureAwait(false);
             }
-            // Fold the meeting's fragmented live speaker labels now the whole recording is in, and
-            // rewrite the persisted live transcript so the consolidated names flow through into the
-            // memory consolidation below (and any later read of the live transcript). Best-effort and
-            // only meaningful when both speaker-id and the coach's transcript store are present.
-            if (speakerId != null && coachMemory != null)
+            // Fold the meeting's fragmented live speaker labels now the whole recording is in. The
+            // remap renames the jsonl-sourced lines in memory below, and rewrites the coach's copy
+            // of the transcript (when present) so the consolidated names flow through into the
+            // memory consolidation too. Best-effort: on failure the live labels stay as they were.
+            IReadOnlyDictionary<string, string> remap = new Dictionary<string, string>();
+            if (speakerId != null)
             {
                 try
                 {
-                    var remap = speakerId.ConsolidateSession();
+                    remap = speakerId.ConsolidateSession();
                     if (remap.Count > 0)
                     {
-                        var relabelled = await coachMemory.RelabelAsync(stem, remap, CancellationToken.None).ConfigureAwait(false);
-                        AnsiConsole.MarkupLine(
-                            $"[grey]Consolidated {remap.Count} fragmented speaker label(s); relabelled {relabelled} caption(s).[/]");
+                        AnsiConsole.MarkupLine($"[grey]Consolidated {remap.Count} fragmented speaker label(s).[/]");
+                        if (coachMemory != null)
+                        {
+                            await coachMemory.RelabelAsync(stem, remap, CancellationToken.None).ConfigureAwait(false);
+                        }
                     }
                 }
-                catch { /* best-effort: the live labels simply stay as they were */ }
+                catch { remap = new Dictionary<string, string>(); }
             }
             if (coachMemory != null && wantCoachPanel)
             {
@@ -222,19 +217,19 @@ public static class ListenCommand
             }
             AnsiConsole.MarkupLine($"\n[green]Stopped[/] after {duration:hh\\:mm\\:ss}.");
 
-            // Default: save the live transcript (already consolidated above) as the .md artifact and
-            // refine coaching profiles from it. This skips the slow whisper-large batch pass, which on
-            // a long call is minutes of waiting; the benchmark (tools/TranscriptReconcile) showed the
-            // live transcript stands in for it once the live model is large enough and speaker labels
-            // are consolidated (use --speakers). Falls back to the batch pass if the coach DB that
-            // holds the live transcript is unavailable.
+            // Default: save the live transcript (consolidated via the remap above) as the .md
+            // artifact and refine coaching profiles from it. This skips the slow whisper-large batch
+            // pass, which on a long call is minutes of waiting; the benchmark (tools/TranscriptReconcile)
+            // showed the live transcript stands in for it once the live model is large enough and
+            // speaker labels are consolidated (use --speakers). The jsonl caption log is the source,
+            // so this needs no services; the batch pass only runs when the log is empty (a sink
+            // failure, or pure silence).
             if (!full)
             {
-                if (coachMemory != null)
+                var live = LiveCaptionLog.Remap(LiveCaptionLog.Read(LiveCaptionLog.PathFor(stem)), remap);
+                if (live.Count > 0)
                 {
-                    var live = await coachMemory.GetTranscriptAsync(stem, CancellationToken.None).ConfigureAwait(false);
-                    var path = TranscriptMerger.MergeLive(
-                        stem, [.. live.Select(l => (l.At, l.Speaker, l.Text))], AppPaths.TranscriptsDir, duration);
+                    var path = TranscriptMerger.MergeLive(stem, live, AppPaths.TranscriptsDir, duration);
                     AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path}");
 
                     // Keep coaching profiles evolving on the fast path. The --full path refines them
@@ -245,10 +240,8 @@ public static class ListenCommand
                         config, [.. live.Select(l => (l.Speaker, l.Text))], CancellationToken.None).ConfigureAwait(false);
                     return 0;
                 }
-                // Coach DB unavailable: we cannot save the live transcript. Fall through to the batch
-                // pass so the run still produces an artifact rather than promising one it cannot write.
                 AnsiConsole.MarkupLine(
-                    "[yellow]The live transcript needs the coach memory DB, which is unavailable; running the batch transcription instead.[/]");
+                    "[yellow]No live captions were logged; running the batch transcription instead.[/]");
             }
 
             var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
