@@ -6,7 +6,6 @@ using CallScribe.Coach.Memory;
 using CallScribe.Coach.Speaker;
 using CallScribe.Transcription;
 using Spectre.Console;
-using Whisper.net.Ggml;
 
 namespace CallScribe.Commands;
 
@@ -77,14 +76,13 @@ public static class ListenCommand
         if (string.IsNullOrWhiteSpace(liveModel)) liveModel = config.LiveModel;
 
         // Live model is small (~75-466 MB); make sure it's present before capture starts.
-        var liveModelPath = await ModelManager.EnsureWhisperModelAsync(
-            ModelManager.ParseModel(liveModel), QuantizationType.NoQuantization, ct).ConfigureAwait(false);
+        var liveModelPath = await ModelManager.EnsureLiveCaptionModelAsync(liveModel, ct).ConfigureAwait(false);
 
         var stem = RecordCommand.MakeStem(label);
         using var engine = new CaptureEngine(stem, AppPaths.RecordingsDir, config);
         using var captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
 
-        // Every emitted caption also lands in {stem}.live.jsonl so an external process can
+        // Every emitted caption is also appended to {stem}.live.jsonl so an external process can
         // tail the call as it happens. Degrades to null; the session just runs without it.
         using var liveLog = LiveCaptionLog.TryCreate(LiveCaptionLog.PathFor(stem));
         if (liveLog != null) captions.CaptionEmitted += liveLog.Append;
@@ -148,7 +146,7 @@ public static class ListenCommand
             {
                 if (!askChat.IsReachable()) return "Q&A needs Ollama running locally.";
                 var prompt = TranscriptQa.BuildUserPrompt(question, transcript);
-                // Headroom so a thinking model that ignores think=false still lands the answer after
+                // Headroom so a thinking model that ignores think=false still fits the answer after
                 // its (stripped) reasoning instead of truncating mid-sentence.
                 return await askChat
                     .CompleteAsync(config.FastModel, TranscriptQa.SystemPrompt, prompt, jsonMode: false, maxTokens: 512, token)
@@ -194,7 +192,14 @@ public static class ListenCommand
                         AnsiConsole.MarkupLine($"[grey]Consolidated {remap.Count} fragmented speaker label(s).[/]");
                         if (coachMemory != null)
                         {
-                            await coachMemory.RelabelAsync(stem, remap, CancellationToken.None).ConfigureAwait(false);
+                            // Its own try: a DB hiccup here must not throw away a consolidation
+                            // that already succeeded, or the saved transcript keeps the
+                            // fragmented labels the line above just said were folded.
+                            try
+                            {
+                                await coachMemory.RelabelAsync(stem, remap, CancellationToken.None).ConfigureAwait(false);
+                            }
+                            catch { /* the transcript still gets the remap; only the DB copy lags */ }
                         }
                     }
                 }
@@ -226,18 +231,17 @@ public static class ListenCommand
             // failure, or pure silence).
             if (!full)
             {
-                var live = LiveCaptionLog.Remap(LiveCaptionLog.Read(LiveCaptionLog.PathFor(stem)), remap);
-                if (live.Count > 0)
+                var saved = LiveFirstStop.TrySave(
+                    stem, remap, duration, config, AppPaths.RecordingsDir, AppPaths.TranscriptsDir);
+                if (saved != null)
                 {
-                    var path = TranscriptMerger.MergeLive(stem, live, AppPaths.TranscriptsDir, duration);
-                    AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path}");
-
                     // Keep coaching profiles evolving on the fast path. The --full path refines them
                     // from the offline-attributed transcript, but that pass does not run here, so use
                     // the consolidated live transcript instead. Best-effort, on CancellationToken.None
                     // like the other end-of-meeting work.
                     await UpdateCoachingProfilesAsync(
-                        config, [.. live.Select(l => (l.Speaker, l.Text))], CancellationToken.None).ConfigureAwait(false);
+                        config, [.. saved.Lines.Select(l => (l.Speaker, l.Text))], CancellationToken.None)
+                        .ConfigureAwait(false);
                     return 0;
                 }
                 AnsiConsole.MarkupLine(

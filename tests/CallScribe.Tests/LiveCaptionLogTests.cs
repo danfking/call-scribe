@@ -99,6 +99,28 @@ public class LiveCaptionLogTests
     }
 
     [Fact]
+    public void TryCreate_TruncatesAStaleLogFromAPreviousRun()
+    {
+        // Stems have minute resolution, so a false start restarted within the same minute
+        // reuses the path. The WAVs are truncated by their writer; the caption log must be
+        // too, or the stop-time transcript replays the previous call's dialogue.
+        var path = NewLogPath();
+        using (var first = LiveCaptionLog.TryCreate(path))
+        {
+            first!.Append(new CaptionEvent(DateTime.Now, "Others", "From the earlier false start."));
+        }
+
+        using (var second = LiveCaptionLog.TryCreate(path))
+        {
+            second!.Append(new CaptionEvent(DateTime.Now, "Me", "The real call."));
+        }
+
+        var lines = LiveCaptionLog.Read(path);
+        Assert.Single(lines);
+        Assert.Equal("The real call.", lines[0].Text);
+    }
+
+    [Fact]
     public void TryCreate_ReturnsNullWhenThePathIsUnwritable()
     {
         // A path whose "directory" is an existing file cannot be created.

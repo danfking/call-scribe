@@ -21,10 +21,20 @@ public static class SpeakerAttributionFlow
         var meWav = $"{stemPath}.me.wav";
         var othersJson = $"{stemPath}.others.json";
         var meJson = $"{stemPath}.me.json";
-        if (!File.Exists(othersWav) || !File.Exists(othersJson) || !File.Exists(meJson))
+        if (!File.Exists(othersWav))
         {
             AnsiConsole.MarkupLine(
-                "[grey]Speaker attribution skipped: recording or transcript missing (needs keepAudio).[/]");
+                "[grey]Speaker attribution skipped: recording missing (deleted, or keepAudio is false).[/]");
+            return null;
+        }
+        if (!File.Exists(othersJson) || !File.Exists(meJson))
+        {
+            // The live-first stop skips the batch pass, so its per-track .json transcripts
+            // (this pass's input) don't exist yet. The WAVs are there; only a transcription
+            // run is missing, so say that instead of blaming keepAudio.
+            AnsiConsole.MarkupLine(
+                "[grey]Speaker attribution needs the per-track batch transcription, which the live-first stop "
+                + "skips. Run `call-scribe transcribe latest` first.[/]");
             return null;
         }
 

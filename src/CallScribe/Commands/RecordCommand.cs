@@ -4,7 +4,6 @@ using CallScribe.Audio;
 using CallScribe.Transcription;
 using NAudio.Wave;
 using Spectre.Console;
-using Whisper.net.Ggml;
 
 namespace CallScribe.Commands;
 
@@ -30,9 +29,9 @@ public static class RecordCommand
         var stopFullOption = new Option<bool>("--full")
         {
             Description = "Run the slow, high-accuracy batch transcription (whisper-large + VAD) instead of "
-                          + "saving the live transcript. The batch pass is also the only path that honours "
-                          + "keepAudio=false; the default keeps the WAVs for replay. `transcribe latest` "
-                          + "re-runs it later if you change your mind.",
+                          + "saving the live transcript. With keepAudio=true (the default) the WAVs stay "
+                          + "replayable either way and `transcribe latest` re-runs the batch pass later; "
+                          + "keepAudio=false deletes the audio and caption log once a transcript is saved.",
         };
         var stop = new Command("stop",
             "Stop the detached recording and save the live transcript immediately (use --full for the slow "
@@ -76,11 +75,14 @@ public static class RecordCommand
         // download's progress; the windowless worker would otherwise block on it silently.
         try
         {
-            await ModelManager.EnsureWhisperModelAsync(
-                    ModelManager.ParseModel(AppConfig.Load().LiveModel), QuantizationType.NoQuantization, ct)
-                .ConfigureAwait(false);
+            await ModelManager.EnsureLiveCaptionModelAsync(AppConfig.Load().LiveModel, ct).ConfigureAwait(false);
         }
-        catch { /* the worker degrades to capture-only recording when the model is unavailable */ }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The worker degrades to capture-only recording when the model is unavailable.
+            // Cancellation is not that case: a Ctrl-C during the download must abort the
+            // command, not fall through and start a windowless recorder anyway.
+        }
 
         Directory.CreateDirectory(AppPaths.StateDir);
         File.Delete(AppPaths.StopFlag);
@@ -127,23 +129,29 @@ public static class RecordCommand
         LiveCaptionLog? liveLog = null;
         try
         {
-            var liveModelPath = await ModelManager.EnsureWhisperModelAsync(
-                    ModelManager.ParseModel(config.LiveModel), QuantizationType.NoQuantization, ct)
-                .ConfigureAwait(false);
-            var log = LiveCaptionLog.TryCreate(LiveCaptionLog.PathFor(stem));
-            if (log != null)
+            // Open (and truncate) the caption log before anything that can throw: a stale
+            // same-stem log from an earlier run must never survive to be read at stop, even
+            // when the model ensure or engine construction fails below.
+            liveLog = LiveCaptionLog.TryCreate(LiveCaptionLog.PathFor(stem));
+            if (liveLog != null)
             {
+                var liveModelPath = await ModelManager.EnsureLiveCaptionModelAsync(config.LiveModel, ct)
+                    .ConfigureAwait(false);
                 captions = new LiveCaptionEngine(liveModelPath, config.LiveMeSpeechThreshold);
-                captions.CaptionEmitted += log.Append;
+                captions.CaptionEmitted += liveLog.Append;
                 captions.Attach(LiveCaptionEngine.OthersLabel, "yellow", engine.OthersTrack.AddTap(), engine.OthersTrack.WaveFormat);
                 captions.Attach(LiveCaptionEngine.MeLabel, "cyan", engine.MeTrack.AddTap(), engine.MeTrack.WaveFormat);
-                liveLog = log;
             }
         }
-        catch
+        catch (Exception e)
         {
             captions?.Dispose();
             captions = null;
+            // Close the log too, or its handle stays open for the whole call; the truncated
+            // (empty) file stays behind, so the stop falls back to the batch pass.
+            liveLog?.Dispose();
+            liveLog = null;
+            if (e is OperationCanceledException) throw;
         }
 
         engine.Start();
@@ -181,6 +189,7 @@ public static class RecordCommand
         var pid = int.Parse(File.ReadAllText(AppPaths.PidFile));
         var stem = File.Exists(AppPaths.StemFile) ? File.ReadAllText(AppPaths.StemFile) : "(unknown)";
 
+        var killed = false;
         try
         {
             using var worker = Process.GetProcessById(pid);
@@ -191,6 +200,8 @@ public static class RecordCommand
             {
                 AnsiConsole.MarkupLine("[red]Worker did not stop in time; killing it. The WAVs may need repair.[/]");
                 worker.Kill();
+                worker.WaitForExit();
+                killed = true;
             }
         }
         catch (ArgumentException)
@@ -212,37 +223,48 @@ public static class RecordCommand
         var sizeMb = (new FileInfo(others).Length + new FileInfo(me).Length) / 1024.0 / 1024.0;
         AnsiConsole.MarkupLine($"[green]Recording stopped[/] -> {others.EscapeMarkup()} (+ .me.wav, {sizeMb:F1} MB total)");
 
+        var config = AppConfig.Load();
+
         // Default: the worker's live captions become the transcript immediately, same as the
         // start command's live-first stop. The batch pass only runs on --full, or when the live
         // log is empty (an old worker, a sink failure, or pure silence), so a stop always yields
-        // an artifact. This path never deletes the WAVs; they stay replayable.
+        // an artifact.
         if (!full)
         {
-            var lines = LiveCaptionLog.Read(LiveCaptionLog.PathFor(stem));
-            if (lines.Count > 0)
+            if (killed)
             {
-                var path = TranscriptMerger.MergeLive(stem, lines, AppPaths.TranscriptsDir, WavDuration(others));
-                AnsiConsole.MarkupLine($"[green]Live transcript saved[/] (skipped the batch pass): {path.EscapeMarkup()}");
-                return 0;
+                // A killed worker never drained its caption backlog, so the log (and possibly
+                // the WAVs) is missing the end of the call. Save what there is, but say so
+                // rather than reporting a clean success.
+                AnsiConsole.MarkupLine(
+                    "[yellow]The worker was killed before it finished flushing, so the live transcript may be "
+                    + "missing the end of the call. `call-scribe transcribe latest` re-runs the full pass from "
+                    + "the audio.[/]");
             }
+            var saved = LiveFirstStop.TrySave(
+                stem, new Dictionary<string, string>(), WavDuration(others), config,
+                AppPaths.RecordingsDir, AppPaths.TranscriptsDir);
+            if (saved != null) return 0;
             AnsiConsole.MarkupLine(
                 "[yellow]No live captions were logged for this recording; running the batch transcription instead.[/]");
         }
 
         var stemPath = Path.Combine(AppPaths.RecordingsDir, stem);
-        await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, AppConfig.Load(), ct)
+        await Transcription.TranscriptionService.RunAsync(stemPath, modelName: null, config, ct)
             .ConfigureAwait(false);
         return 0;
     }
 
-    /// <summary>The recorded length for the transcript frontmatter, from the WAV header. Null (a
-    /// truncated header after a crash) lets MergeLive fall back to the caption span.</summary>
-    private static TimeSpan? WavDuration(string wavPath)
+    /// <summary>The recorded length for the transcript frontmatter, from the WAV header. Null when
+    /// the header is unusable, so MergeLive falls back to the caption span: a truncated header
+    /// after a crash throws, and the zero-length placeholder a killed worker leaves behind reads
+    /// as 00:00 rather than throwing.</summary>
+    internal static TimeSpan? WavDuration(string wavPath)
     {
         try
         {
             using var reader = new WaveFileReader(wavPath);
-            return reader.TotalTime;
+            return reader.TotalTime > TimeSpan.Zero ? reader.TotalTime : null;
         }
         catch
         {

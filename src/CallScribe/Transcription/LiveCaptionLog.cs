@@ -18,8 +18,11 @@ public sealed class LiveCaptionLog : IDisposable
 
     public static string PathFor(string stem) => Path.Combine(AppPaths.RecordingsDir, $"{stem}.live.jsonl");
 
-    /// <summary>Open the log for appending, or null when the file cannot be opened (the recording
-    /// then simply runs without a live caption file, per the degrade-to-null convention).</summary>
+    /// <summary>Open the log for this recording, or null when the file cannot be opened (the
+    /// recording then simply runs without a live caption file, per the degrade-to-null convention).
+    /// Truncates any stale log at the same path: stems have minute resolution, so a restarted
+    /// recording can reuse the stem, and the previous run's captions must not leak into this
+    /// run's stop-time transcript (the WAV writers truncate for the same reason).</summary>
     public static LiveCaptionLog? TryCreate(string path)
     {
         try
@@ -27,11 +30,14 @@ public sealed class LiveCaptionLog : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             // FileShare.ReadWrite is the tailing contract: Get-Content -Wait (and Read below)
             // must be able to open the file while the recording holds it.
-            var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
             return new LiveCaptionLog(new StreamWriter(stream));
         }
         catch
         {
+            // Couldn't open the log, so this run can't overwrite it either; make sure a stale
+            // same-stem log from an earlier run can't be mistaken for this recording's at stop.
+            try { File.Delete(path); } catch { }
             return null;
         }
     }
@@ -80,7 +86,9 @@ public sealed class LiveCaptionLog : IDisposable
     public static IReadOnlyList<(DateTime At, string Speaker, string Text)> Remap(
         IReadOnlyList<(DateTime At, string Speaker, string Text)> lines,
         IReadOnlyDictionary<string, string> remap) =>
-        [.. lines.Select(l => remap.TryGetValue(l.Speaker, out var name) ? (l.At, name, l.Text) : l)];
+        remap.Count == 0
+            ? lines
+            : [.. lines.Select(l => remap.TryGetValue(l.Speaker, out var name) ? (l.At, name, l.Text) : l)];
 
     public void Dispose()
     {

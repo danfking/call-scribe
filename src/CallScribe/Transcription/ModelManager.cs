@@ -10,6 +10,11 @@ public static class ModelManager
     public const GgmlType DefaultModel = GgmlType.LargeV3Turbo;
     public const QuantizationType DefaultQuantization = QuantizationType.Q8_0;
 
+    /// <summary>Ensure the live caption model named in config (e.g. "small.en"), unquantized.
+    /// One place for the parse-plus-ensure the three live capture entry points all need.</summary>
+    public static Task<string> EnsureLiveCaptionModelAsync(string modelName, CancellationToken ct) =>
+        EnsureWhisperModelAsync(ParseModel(modelName), QuantizationType.NoQuantization, ct);
+
     public static async Task<string> EnsureWhisperModelAsync(
         GgmlType type = DefaultModel,
         QuantizationType quantization = DefaultQuantization,

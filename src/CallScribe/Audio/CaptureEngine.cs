@@ -10,6 +10,7 @@ public sealed class CaptureEngine : IDisposable
 {
     private readonly CaptureTrack _others;
     private readonly CaptureTrack _me;
+    private readonly Stopwatch _epoch = new();
 
     public CaptureTrack OthersTrack => _others;
     public CaptureTrack MeTrack => _me;
@@ -28,15 +29,16 @@ public sealed class CaptureEngine : IDisposable
         LoopbackDeviceName = captures.OthersName;
         MicDeviceName = captures.MeName;
 
-        var epoch = new Stopwatch();
-        _others = new CaptureTrack("Others", captures.Others, epoch, OthersPath);
-        _me = new CaptureTrack("Me", captures.Me, epoch, mePath);
-
-        epoch.Start();
+        _others = new CaptureTrack("Others", captures.Others, _epoch, OthersPath);
+        _me = new CaptureTrack("Me", captures.Me, _epoch, mePath);
     }
 
     public void Start()
     {
+        // The epoch is the wall-clock zero both tracks pad silence against. It must start
+        // here, not in the ctor: callers load models between construction and Start(), and
+        // that window would otherwise become zero-padded dead air at the head of both WAVs.
+        _epoch.Start();
         _others.Start();
         _me.Start();
     }

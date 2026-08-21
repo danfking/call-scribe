@@ -50,7 +50,11 @@ public static class TranscriptionService
         {
             File.Delete(othersWav);
             File.Delete(meWav);
-            AnsiConsole.MarkupLine("[grey]Audio files deleted (keepAudio is false).[/]");
+            // The live caption log carries the same words as the deleted audio; keepAudio=false
+            // means nothing but the merged .md remains. No-op when the recording predates the
+            // live caption log or never produced one.
+            File.Delete($"{stemPath}.live.jsonl");
+            AnsiConsole.MarkupLine("[grey]Audio and caption log deleted (keepAudio is false).[/]");
         }
 
         return transcriptPath;
